@@ -165,6 +165,9 @@ macro_rules! icon {
 }
 
 pub const ICONS: &[IconSvg] = &[
+    icon!("statementRead", "statementRead"),
+    icon!("statementWrite", "statementWrite"),
+    icon!("statementOther", "statementOther"),
     icon!("queryPlan", "queryPlan"),
     icon!("planText", "planText"),
     icon!("planSelect", "planSelect"),

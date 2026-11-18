@@ -660,6 +660,22 @@ impl CodeIntel for RoutedCodeIntel {
         first(self.each(doc, |s| s.document_highlights(doc, at)))
     }
 
+    /// Filter labels for this document; the first group is initially shown.
+    fn structure_filters(&self, doc: &DocumentId) -> &'static [&'static str] {
+        self.services(doc)
+            .into_iter()
+            .map(|(_, service)| service.structure_filters(doc))
+            .find(|filters| !filters.is_empty())
+            .unwrap_or_default()
+    }
+
+    /// Whether successful same-document renames are edited at their source position.
+    fn prefers_inline_rename(&self, doc: &DocumentId) -> bool {
+        self.services(doc)
+            .into_iter()
+            .any(|(_, service)| service.prefers_inline_rename(doc))
+    }
+
     fn document_symbols(&self, doc: &DocumentId) -> Intel<Vec<DocumentSymbol>> {
         joined(self.each(doc, |s| s.document_symbols(doc)))
     }

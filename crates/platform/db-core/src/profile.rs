@@ -211,6 +211,9 @@ impl Profile {
                 }
             }
         }
+        if self.gui_options().auth == AuthMethod::Pgpass && self.backend != Backend::Postgres {
+            return Err(Error::config("pgpass requires PostgreSQL"));
+        }
         if self.dsn.is_some() && self.dialect() != Dialect::Oracle {
             return Err(Error::config("dsn is only valid for Oracle backends"));
         }
@@ -306,21 +309,25 @@ pub enum PasswordSave {
     Forever,
     /// In memory until the IDE quits.
     UntilRestart,
+    /// Kept for one connected data source handle.
+    ForSession,
     /// Not kept: asked on every connect.
     Never,
 }
 
 impl PasswordSave {
-    pub const ALL: [PasswordSave; 3] = [
-        PasswordSave::Forever,
-        PasswordSave::UntilRestart,
+    pub const ALL: [PasswordSave; 4] = [
         PasswordSave::Never,
+        PasswordSave::UntilRestart,
+        PasswordSave::ForSession,
+        PasswordSave::Forever,
     ];
 
     pub fn id(self) -> &'static str {
         match self {
             PasswordSave::Forever => "forever",
             PasswordSave::UntilRestart => "until-restart",
+            PasswordSave::ForSession => "for-session",
             PasswordSave::Never => "never",
         }
     }
@@ -341,11 +348,37 @@ pub enum AuthMethod {
     /// A user name and a password.
     #[default]
     UserPassword,
+    /// PostgreSQL password file.
+    #[serde(rename = "pgpass")]
+    Pgpass,
     /// Nothing (a trusting server, a file database).
     None,
 }
 
 impl AuthMethod {
+    pub fn choices(backend: Backend) -> &'static [Self] {
+        match backend {
+            Backend::Postgres => &[Self::Pgpass, Self::UserPassword, Self::None],
+            Backend::OracleOdpi => &[Self::UserPassword, Self::None],
+            Backend::OracleThin => &[Self::UserPassword],
+            Backend::Sqlite => &[Self::None],
+        }
+    }
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::UserPassword => "user-password",
+            Self::None => "none",
+            Self::Pgpass => "pgpass",
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::UserPassword => "User & Password",
+            Self::None => "No auth",
+            Self::Pgpass => "pgpass",
+        }
+    }
+
     fn is_default(&self) -> bool {
         *self == Self::default()
     }

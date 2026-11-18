@@ -62,6 +62,7 @@ pub(crate) struct Live {
     /// handle).
     pub profile: Profile,
     pub handle: DataSourceHandle,
+    pub credentials: crate::store::CredentialSession,
     /// The handle's model as last read.
     pub model: Arc<Model>,
     /// The model came from the cache or a refresh (an empty model before
@@ -77,12 +78,23 @@ pub(crate) struct Live {
     pub error: Option<String>,
 }
 
+impl Drop for Live {
+    fn drop(&mut self) {
+        self.credentials.clear();
+    }
+}
+
 impl Live {
-    pub fn new(profile: Profile, handle: DataSourceHandle) -> Self {
+    pub fn new(
+        profile: Profile,
+        handle: DataSourceHandle,
+        credentials: crate::store::CredentialSession,
+    ) -> Self {
         let model = handle.model().get();
         Self {
             profile,
             handle,
+            credentials,
             model,
             has_model: false,
             cache_loading: false,
@@ -176,6 +188,7 @@ impl Live {
 /// that no connect ends in "no password" when a prompt can fix it.
 pub(crate) struct Prompting {
     inner: Arc<dyn ConnectionSource>,
+    session: crate::store::CredentialSession,
     store: Arc<dyn DataSourceStore>,
     root: PathBuf,
     source: DataSource,
@@ -184,14 +197,15 @@ pub(crate) struct Prompting {
 
 impl Prompting {
     pub fn new(
-        inner: Arc<dyn ConnectionSource>,
+        session: crate::store::CredentialSession,
         store: Arc<dyn DataSourceStore>,
         root: PathBuf,
         source: DataSource,
         asker: Option<Asker>,
     ) -> Arc<Self> {
         Arc::new(Self {
-            inner,
+            inner: store.session_connections(&root, session.clone()),
+            session,
             store,
             root,
             source,
@@ -208,10 +222,17 @@ impl ConnectionSource for Prompting {
         purpose: Purpose,
     ) -> db_core::Result<Arc<dyn Connection>> {
         if let Some(asker) = &self.asker
-            && self.source.profile.needs_password()
-            && self.store.needs_prompt(&self.root, &self.source)
+            && self
+                .store
+                .needs_session_prompt(&self.root, &self.source, &self.session)
         {
-            let typed = asker.ask(self.root.clone(), self.source.name.clone()).await;
+            let typed = asker
+                .ask(
+                    self.root.clone(),
+                    self.source.name.clone(),
+                    self.session.clone(),
+                )
+                .await;
             if !typed {
                 return Err(db_core::Error::new(
                     db_core::ErrorKind::Cancelled,
@@ -224,7 +245,11 @@ impl ConnectionSource for Prompting {
             && e.kind == db_core::ErrorKind::Auth
         {
             // The server refused it: the next connect asks again.
-            self.store.release_password(&self.root, &self.source.name);
+            if self.session.answer().is_some() {
+                self.session.clear();
+            } else {
+                self.store.reject_password(&self.root, &self.source.name);
+            }
         }
         opened
     }

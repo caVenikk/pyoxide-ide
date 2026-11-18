@@ -6,6 +6,7 @@ pub mod diagnose;
 pub mod hints;
 pub mod import;
 pub mod ops;
+mod pgpass;
 pub mod profiles;
 pub mod redact;
 pub mod secrets;

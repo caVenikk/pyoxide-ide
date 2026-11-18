@@ -71,6 +71,7 @@ macro_rules! areas {
 areas! {
     editor,
     code_insight,
+    file_structure,
     window,
     run,
     debug,
@@ -731,6 +732,7 @@ fn script_docs(fake: &FakeCodeIntel) {
             }],
         })
     });
+    fake.set_structure_filters(&["First", "Second", "Third", "Fourth"]);
     fake.on_document_symbols(|_| {
         let mut alpha = code_intel::DocumentSymbol::new(
             "alpha",

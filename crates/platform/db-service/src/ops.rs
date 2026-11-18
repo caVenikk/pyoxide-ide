@@ -344,23 +344,8 @@ pub async fn open_profile(
     profile: &Profile,
     password: Option<Secret>,
 ) -> Result<Opened, Error> {
-    profile.validate()?;
-    let (params, password_source) = match password {
-        Some(password) => {
-            let wallet = svc.secrets_for(name, profile).wallet_password;
-            (profile.to_params(password, wallet)?, SecretSource::Prompt)
-        }
-        None => svc.params_for(name, profile)?,
-    };
-    let started = Instant::now();
-    let conn = crate::driver(profile.backend).connect(&params).await?;
-    Ok(Opened {
-        conn,
-        name: name.to_owned(),
-        profile: profile.clone(),
-        password_source,
-        connect_ms: millis(started),
-    })
+    svc.open_profile_for(name.to_owned(), profile.clone(), password, None)
+        .await
 }
 
 pub async fn query(svc: &DbService, args: &QueryArgs) -> Result<QueryOutput, Error> {

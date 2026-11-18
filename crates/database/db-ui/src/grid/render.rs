@@ -340,7 +340,9 @@ impl TableGrid {
                 // The content, or the header: name, icon, gaps, sort mark.
                 let header = char_width * c.name.chars().count() as f32
                     + px(2.0 * CELL_PAD + 2.0 + HEADER_ICON + 2.0 * SORT_MARK + 2.0 + 24.0);
-                let auto = (char_width * c.chars as f32 + px(2.0 * CELL_PAD + 2.0)).max(header);
+                let auto = (char_width * c.chars.min(self.auto_width_limit) as f32
+                    + px(2.0 * CELL_PAD + 2.0))
+                .max(header);
                 let w = if self.hidden.contains(&c.name) {
                     px(0.0)
                 } else {

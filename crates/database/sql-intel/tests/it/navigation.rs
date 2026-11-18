@@ -517,12 +517,16 @@ fn the_structure_lists_statements_with_their_kind_and_name() {
         [
             "staging",
             "v",
-            "select",
-            "insert into staging",
-            "update staging",
-            "delete from staging",
+            "WITH a AS (SELECT 1), b AS (SELECT 2) SELECT * FROM a, b",
+            "INSERT INTO staging (id) VALUES (1)",
+            "UPDATE staging SET id = 2",
+            "DELETE FROM staging",
             "drop table staging"
         ]
+    );
+    assert_eq!(
+        top.iter().filter_map(|s| s.group).collect::<Vec<_>>(),
+        [0, 0, 2, 1, 1, 1, 0]
     );
     assert_eq!(top[0].kind, SymbolKind::Struct);
     assert_eq!(top[0].detail.as_deref(), Some("table"));
@@ -530,8 +534,40 @@ fn the_structure_lists_statements_with_their_kind_and_name() {
     assert_eq!(top[0].children[1].detail.as_deref(), Some("text"));
     assert_eq!(s.slice(&top[0].selection_range), "staging");
     assert_eq!(names(&top[2].children), ["a", "b"]);
-    assert_eq!(top[2].detail.as_deref(), Some("from a, b"));
+    assert_eq!(top[2].detail, None);
     assert!(s.slice(&top[0].range).starts_with("create table"));
+}
+
+#[test]
+fn structure_previews_preserve_quoted_names_literals_and_statement_boundaries() {
+    let s = session(
+        pg(),
+        "create table review_filter_480 (sample_id integer);
+insert into review_filter_480 (sample_id) values (1);
+select \"MiX 名\", 'keEP;  Both' from review_filter_480; commit;|",
+    );
+    let symbols = s.symbols();
+    assert_eq!(
+        names(&symbols),
+        [
+            "review_filter_480",
+            "INSERT INTO review_filter_480 (sample_id) VALUES (1)",
+            "SELECT \"MiX 名\", 'keEP;  Both' FROM review_filter_480",
+            "COMMIT"
+        ]
+    );
+    assert_eq!(symbols[0].icon, Some("db/table"));
+    assert_eq!(symbols[0].children[0].name, "sample_id");
+    assert_eq!(symbols[0].children[0].detail.as_deref(), Some("integer"));
+    assert_eq!(symbols[0].children[0].icon, Some("db/column"));
+    assert_eq!(
+        symbols
+            .iter()
+            .skip(1)
+            .map(|s| s.icon.unwrap())
+            .collect::<Vec<_>>(),
+        ["db/statementWrite", "db/statementRead", "db/statementOther"]
+    );
 }
 
 #[test]
@@ -552,7 +588,7 @@ fn the_structure_of_a_package_has_its_members() {
 #[test]
 fn the_structure_of_a_broken_script_skips_what_it_cannot_name() {
     let s = session(pg(), "create table (;\nselect 1;|");
-    assert_eq!(names(&s.symbols()), ["select"]);
+    assert_eq!(names(&s.symbols()), ["SELECT 1"]);
 }
 
 #[test]

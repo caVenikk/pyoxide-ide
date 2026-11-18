@@ -6,6 +6,7 @@ use sql_syntax::{StatementKind, TokenKind};
 /// What a session runs: statements of a script, one after another.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Job {
+    pub(crate) complete_result: bool,
     pub(crate) source: JobSource,
     pub(crate) on_error: ErrorPolicy,
 }
@@ -59,6 +60,7 @@ impl Job {
     /// dialect (`sql_syntax::split`).
     pub fn script(text: impl Into<String>) -> Self {
         Self {
+            complete_result: false,
             source: JobSource::Script(text.into()),
             on_error: ErrorPolicy::Stop,
         }
@@ -68,9 +70,16 @@ impl Job {
     /// selection).
     pub fn statements(statements: impl IntoIterator<Item = impl Into<JobStatement>>) -> Self {
         Self {
+            complete_result: false,
             source: JobSource::Statements(statements.into_iter().map(Into::into).collect()),
             on_error: ErrorPolicy::Stop,
         }
+    }
+
+    /// Return every row of a structured result (such as a plan) in one event.
+    pub fn with_complete_result(mut self) -> Self {
+        self.complete_result = true;
+        self
     }
 
     pub fn on_error(mut self, policy: ErrorPolicy) -> Self {

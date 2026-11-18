@@ -309,6 +309,7 @@ pub(crate) enum DragUnit {
 
 /// A code editor for one buffer.
 pub struct Editor {
+    pub(crate) linked_preview: Option<(std::sync::Arc<[Range<usize>]>, String)>,
     pub(crate) buffer: Buffer,
     pub(crate) selections: SelectionSet,
     focus: FocusHandle,
@@ -516,6 +517,7 @@ impl Editor {
             center_caret: false,
             caret_view_y: None,
             single_line: false,
+            linked_preview: None,
             placeholder: None,
             placeholder_unfocused: false,
             error: false,
@@ -1095,6 +1097,16 @@ impl Editor {
         layout
             .over_text(position)
             .then(|| self.offset_for_position(position))
+    }
+
+    /// Display draft replacements without modifying the buffer or its undo history.
+    pub fn set_linked_preview(
+        &mut self,
+        preview: Option<(std::sync::Arc<[Range<usize>]>, String)>,
+        cx: &mut Context<Self>,
+    ) {
+        self.linked_preview = preview;
+        cx.notify();
     }
 
     /// Window bounds of the text area in the last frame (without the

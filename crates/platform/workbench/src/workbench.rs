@@ -588,6 +588,11 @@ impl Workbench {
                 }
             }
             CodeIntelEvent::ShowDocumentation => self.show_documentation_window(window, cx),
+            CodeIntelEvent::RenameInline {
+                name,
+                active,
+                occurrences,
+            } => self.open_inline_rename(name, active.clone(), occurrences.clone(), window, cx),
             CodeIntelEvent::RenameDialog { name } => {
                 self.open_rename_dialog(name.clone(), window, cx)
             }
@@ -1002,6 +1007,18 @@ impl Workbench {
             Some(project) if p.is_relative() => native_path::join(project.root(), p),
             _ => p.to_owned(),
         }
+    }
+
+    /// Open a file in an independent editor window while a modal operation
+    /// remains pending in this workbench.
+    pub fn open_file_window(&self, path: PathBuf, cx: &mut Context<Self>) {
+        let product = self.product.clone();
+        cx.defer(move |cx| {
+            let editor = crate::app::open_main_window(cx, product);
+            let _ = editor.update(cx, |workbench, window, cx| {
+                workbench.open_file(path, window, cx)
+            });
+        });
     }
 
     /// Opens a file in a tab (or selects its tab); reading happens off the
@@ -3110,7 +3127,7 @@ impl Render for Workbench {
             .children(self.render_run_menu(window))
             .children(self.render_tab_menu(window))
             .children(self.render_editor_menu(window))
-            .children(self.render_code_rename())
+            .children(self.render_code_rename(cx))
             .children(self.render_branch_overlays(window, cx))
             .children(self.render_project_widget_popup(window))
             .children(self.render_commit_overlays())

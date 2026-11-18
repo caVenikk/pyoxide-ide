@@ -81,6 +81,11 @@ pub enum CodeIntelEvent {
     /// [`CodeIntelView::rename_confirmed`] or
     /// [`CodeIntelView::rename_cancelled`].
     RenameDialog { name: String },
+    RenameInline {
+        name: String,
+        active: std::ops::Range<usize>,
+        occurrences: Vec<std::ops::Range<usize>>,
+    },
     /// The services refused the new name (a message for the dialog).
     RenameRejected(String),
     /// The rename was applied (the dialog closes).

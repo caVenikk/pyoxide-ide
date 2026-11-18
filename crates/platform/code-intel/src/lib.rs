@@ -230,6 +230,16 @@ pub trait CodeIntel: Send + Sync + 'static {
         unsupported()
     }
 
+    /// Filter labels for this document.
+    fn structure_filters(&self, _doc: &DocumentId) -> &'static [&'static str] {
+        &[]
+    }
+
+    /// Whether successful same-document renames are edited at their source position.
+    fn prefers_inline_rename(&self, _doc: &DocumentId) -> bool {
+        false
+    }
+
     /// The structure of a document: its symbols with the symbols declared
     /// inside them, in the order of the text.
     fn document_symbols(&self, doc: &DocumentId) -> Intel<Vec<DocumentSymbol>> {

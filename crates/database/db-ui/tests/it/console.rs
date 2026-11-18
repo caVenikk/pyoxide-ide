@@ -19,6 +19,10 @@ use super::*;
 fn server() -> FakeSource {
     let source = FakeSource::new(Backend::Postgres);
     source.on(
+        "explain (format text)",
+        Reaction::column("QUERY PLAN", &["Result  (cost=0.00..1.00 rows=1 width=4)"]),
+    );
+    source.on(
         "demo.nope",
         Reaction::query_error("42P01", "relation \"demo.nope\" does not exist"),
     );
@@ -775,6 +779,49 @@ fn run(cx: &mut TestAppContext, macos: bool) {
                 h.press(&b.keys);
                 let s = wait_console(h, "the key's statement", idle);
                 assert!(output(&s).contains("3 rows retrieved"), "{s}");
+                true
+            }
+            command if command.starts_with("db.plan.") || command == "workbench.focus-editor" => {
+                let index = if console_state(h)["tabs"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|t| t["plan"].is_null())
+                {
+                    h.invoke("db.console.explain", Value::Null);
+                    let s = wait_console(h, "plan", |s| {
+                        idle(s)
+                            && s["tabs"]
+                                .as_array()
+                                .unwrap()
+                                .iter()
+                                .any(|t| !t["plan"].is_null())
+                    });
+                    s["pane"].as_u64().unwrap() as usize
+                } else {
+                    console_state(h)["pane"].as_u64().unwrap() as usize
+                };
+                let mode = if b.context.as_deref() == Some("DatabasePlanRaw > DatabaseGrid") {
+                    "text"
+                } else {
+                    "tree"
+                };
+                h.invoke("db.plan.view", json!({"mode": mode}));
+                let start = if matches!(command, "db.plan.up" | "db.plan.left") {
+                    vec![0]
+                } else {
+                    vec![]
+                };
+                h.invoke("db.plan.select", json!({"path":start}));
+                h.press(&b.keys);
+                let plan = &console_state(h)["tabs"][index]["plan"];
+                match command {
+                    "db.plan.up" | "db.plan.left" => assert_eq!(plan["selected"], json!([])),
+                    "db.plan.down" | "db.plan.right" => assert_eq!(plan["selected"], json!([0])),
+                    "db.plan.switch-view" => assert_eq!(plan["mode"], "text"),
+                    "workbench.focus-editor" => assert_eq!(plan["mode"], mode),
+                    _ => return false,
+                }
                 true
             }
             _ => false,

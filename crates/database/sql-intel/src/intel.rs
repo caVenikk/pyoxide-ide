@@ -468,6 +468,19 @@ impl CodeIntel for SqlCodeIntel {
         })
     }
 
+    fn structure_filters(&self, _: &DocumentId) -> &'static [&'static str] {
+        &[
+            "DDL statements",
+            "DML statements",
+            "Select statements",
+            "Other",
+        ]
+    }
+
+    fn prefers_inline_rename(&self, _: &DocumentId) -> bool {
+        true
+    }
+
     fn document_symbols(&self, doc: &DocumentId) -> Intel<Vec<DocumentSymbol>> {
         let doc = doc.clone();
         self.query(move |w| {
@@ -1004,6 +1017,15 @@ fn document_symbol(rope: &Rope, s: &structure::Symbol) -> DocumentSymbol {
         name: s.name.clone(),
         detail: s.detail.clone(),
         kind: s.kind,
+        icon: match (s.group, s.kind, s.detail.as_deref()) {
+            (Some(0), _, Some("table")) => Some("db/table"),
+            (None, code_intel::SymbolKind::Field, _) => Some("db/column"),
+            (Some(2), _, _) => Some("db/statementRead"),
+            (Some(1), _, _) => Some("db/statementWrite"),
+            (Some(3), _, _) => Some("db/statementOther"),
+            _ => None,
+        },
+        group: s.group,
         range: range(&s.range),
         selection_range: range(&s.selection),
         children: s

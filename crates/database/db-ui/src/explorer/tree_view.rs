@@ -60,26 +60,6 @@ pub(crate) fn database_name(profile: &db_core::Profile) -> Option<&str> {
     }
 }
 
-/// Two profiles connect alike: they differ at most in what is shown or
-/// read (colour, comment, introspection level and scope).
-fn same_connection(a: &db_core::Profile, b: &db_core::Profile) -> bool {
-    let plain = |p: &db_core::Profile| {
-        let mut p = p.clone();
-        let mut gui = p.gui_options();
-        gui.password_save = db_core::PasswordSave::default();
-        gui.color = None;
-        gui.object_colors.clear();
-        gui.comment = None;
-        gui.level = None;
-        gui.schema_levels.clear();
-        gui.scope = None;
-        gui.refresh_minutes = None;
-        p.gui = (!gui.is_default()).then_some(gui);
-        p
-    };
-    plain(a) == plain(b)
-}
-
 /// Where the name of a row at `depth` starts, from the rows' left edge.
 pub(super) fn text_x(depth: usize, cx: &App) -> gpui::Pixels {
     px(TREE_LEFT + ICON_X + TEXT_X) + cx.theme().metric(Metric::TreeIndent) * depth as f32
@@ -234,8 +214,13 @@ impl Explorer {
             };
             // How long the password is kept does not change what the
             // handle connects to.
-            if !same_connection(&source.profile, &live.profile) {
+            if !crate::store::same_connection(&source.profile, &live.profile) {
                 return false;
+            }
+            if live.profile.gui_options().password_save
+                != source.profile.gui_options().password_save
+            {
+                live.credentials.clear();
             }
             live.profile = source.profile.clone();
             true
@@ -293,8 +278,9 @@ impl Explorer {
         };
         let store = crate::store(cx);
         let sink = self.sink(cx);
+        let credentials = crate::store::CredentialSession::default();
         let connections = live::Prompting::new(
-            store.connections(&root),
+            credentials.clone(),
             store.clone(),
             root.clone(),
             source.clone(),
@@ -306,7 +292,7 @@ impl Explorer {
             connections,
             sink,
         );
-        let mut live = Live::new(source.profile.clone(), handle);
+        let mut live = Live::new(source.profile.clone(), handle, credentials);
         match store.model_cache(&root) {
             Some(cache) => {
                 live.cache_loading = true;
@@ -329,9 +315,19 @@ impl Explorer {
     /// background, for the counters.
     fn load_totals(&mut self, source: &DataSource, root: &Path, cx: &mut Context<Self>) {
         let store = crate::store(cx);
-        let schemas = store.schemas(root, source.clone(), None);
+        let mut source = source.clone();
+        let password = self
+            .tree
+            .lives
+            .get(&source.name)
+            .and_then(|live| live.credentials.answer())
+            .and_then(|answer| {
+                answer.apply(&mut source.profile);
+                answer.password_override()
+            });
+        let schemas = store.schemas(root, source.clone(), password.clone());
         let databases = (source.profile.backend == db_core::Backend::Postgres)
-            .then(|| store.databases(root, source.clone(), None));
+            .then(|| store.databases(root, source.clone(), password));
         let run = cx.background_spawn(async move {
             let schemas = schemas.await.ok().map(|s| s.len());
             let databases = match databases {

@@ -520,6 +520,7 @@ pub struct TableGrid {
     /// Scroll offset of the cells (the header follows horizontally).
     scroll: Point<Pixels>,
     /// Widths set by dragging a header's edge, by column name.
+    auto_width_limit: usize,
     widths: std::collections::HashMap<SharedString, Pixels>,
     /// Columns hidden in the view (by name); the statement is not changed.
     hidden: std::collections::HashSet<SharedString>,
@@ -660,6 +661,7 @@ impl TableGrid {
             error: None,
             selection: None,
             scroll: point(px(0.0), px(0.0)),
+            auto_width_limit: data::MAX_COLUMN_CHARS,
             widths: Default::default(),
             hidden: Default::default(),
             resize: None,
@@ -678,6 +680,13 @@ impl TableGrid {
             grid.read_page(grid.query.clone(), 0, false, cx);
         }
         grid
+    }
+
+    /// Plan lines are shown in a single column, wide enough for the longest
+    /// displayed line. The user can still drag its header to resize it.
+    pub(crate) fn fit_plan_lines(mut self) -> Self {
+        self.auto_width_limit = usize::MAX;
+        self
     }
 
     /// The grid shows a console's result.
@@ -1411,6 +1420,7 @@ impl TableGrid {
                     data::KeyMark::Foreign => json!("foreign"),
                 },
                 "right": c.right,
+                "auto_width_chars": c.chars.min(self.auto_width_limit),
                 "hidden": self.hidden.contains(&c.name),
             })).collect::<Vec<_>>()),
             "sort": page.map(|p| self.sort_marks(p)

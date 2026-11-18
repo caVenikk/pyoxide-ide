@@ -35,7 +35,7 @@ ui::ui_commands! {
     COMMANDS, scope = "DataSourcesDialog";
     /// Set a field.
     DialogSet { field: String, value: String } => "db.data-sources.set", "Set Field",
-        "Sets a field of the selected data source in the Data Sources dialog. Text fields: `name`, `comment`, `host`, `port`, `user`, `database`, `service`, `dsn`, `path`, `url`, `time-zone`, `keep-alive-secs`, `auto-disconnect-secs`, `startup-script`, `refresh-minutes`, `ca-file`, `client-cert`, `client-key`, `wallet-dir`, `schema-pattern`; `password` (typed, never echoed). Choices: `driver` (a backend id), `connection-type` (`default`, `url-only`, `tns`), `auth` (`user-password`, `none`), `save` (`forever`, `until-restart`, `never`), `service-kind` (`service`, `sid`), `tx-mode` (`auto`, `manual`), `session` (`dedicated`, `single`), `level` (`auto`, `names`, `structure`, `full`), `ssl-mode` (`prefer`, `require`, `verify-ca`, `verify-full`). Check boxes (`true`, `false`): `read-only`, `keep-alive`, `auto-disconnect`, `auto-sync`, `use-ssl`, `show-system`, `all-schemas`, `current-schema`, `schema:<name>`.",
+        "Sets a field of the selected data source in the Data Sources dialog. Text fields: `name`, `comment`, `host`, `port`, `user`, `database`, `service`, `dsn`, `path`, `url`, `time-zone`, `keep-alive-secs`, `auto-disconnect-secs`, `startup-script`, `refresh-minutes`, `ca-file`, `client-cert`, `client-key`, `wallet-dir`, `schema-pattern`; `password` (typed, never echoed). Choices: `driver` (a backend id), `connection-type` (`default`, `url-only`, `tns`), `auth` (`pgpass`, `user-password`, `none`), `save` (`forever`, `until-restart`, `for-session`, `never`), `service-kind` (`service`, `sid`), `tx-mode` (`auto`, `manual`), `session` (`dedicated`, `single`), `level` (`auto`, `names`, `structure`, `full`), `ssl-mode` (`prefer`, `require`, `verify-ca`, `verify-full`). Check boxes (`true`, `false`): `read-only`, `keep-alive`, `auto-disconnect`, `auto-sync`, `use-ssl`, `show-system`, `all-schemas`, `current-schema`, `schema:<name>`.",
         r#"{"field": "host", "value": "localhost"}"#;
     /// Open a list.
     DialogOpenList { list: String } => "db.data-sources.open-list", "Open List",
@@ -292,16 +292,20 @@ impl ListId {
 }
 
 /// The values of a list: id and label.
-pub(crate) fn choices(list: ListId) -> Vec<(&'static str, &'static str)> {
+pub(crate) fn choices(list: ListId, backend: Backend) -> Vec<(&'static str, &'static str)> {
     match list {
         ListId::Driver => BACKENDS
             .iter()
             .map(|b| (b.id(), backend_title(*b)))
             .collect(),
-        ListId::Auth => vec![("user-password", "User & Password"), ("none", "No auth")],
+        ListId::Auth => db_core::profile::AuthMethod::choices(backend)
+            .iter()
+            .map(|auth| (auth.id(), auth.label()))
+            .collect(),
         ListId::Save => vec![
             ("never", "Never"),
             ("until-restart", "Until restart"),
+            ("for-session", "For session"),
             ("forever", "Forever"),
         ],
         ListId::ServiceKind => vec![("service", "Service name"), ("sid", "SID")],
@@ -524,6 +528,12 @@ fn capitalize(s: &str) -> String {
 /// A new data source of `backend` with the reference's defaults.
 fn new_profile(backend: Backend) -> Profile {
     let mut p = Profile::new(backend);
+    if backend != Backend::Sqlite {
+        p.gui = Some(db_core::GuiOptions {
+            password_save: PasswordSave::UntilRestart,
+            ..Default::default()
+        });
+    }
     match backend.dialect() {
         Dialect::Postgres => {
             p.host = "localhost".into();
@@ -1258,10 +1268,11 @@ impl DataSourcesDialog {
                 self.fill(cx);
             }
             ListId::Auth => {
-                let auth = match value {
-                    "none" => db_core::profile::AuthMethod::None,
-                    "user-password" => db_core::profile::AuthMethod::UserPassword,
-                    _ => return false,
+                let Some(&auth) = db_core::profile::AuthMethod::choices(item.profile().backend)
+                    .iter()
+                    .find(|a| a.id() == value)
+                else {
+                    return false;
                 };
                 item.set_gui(|g| g.auth = auth);
             }
@@ -1535,6 +1546,9 @@ impl DataSourcesDialog {
     /// The password a connection of `item` uses: the typed one, else the
     /// kept one (`None`).
     fn password_to_try(&self, item: &Item) -> Option<Secret> {
+        if item.gui().auth != db_core::profile::AuthMethod::UserPassword {
+            return None;
+        }
         match &item.password {
             PasswordEdit::Set(secret) => Some(secret.clone()),
             PasswordEdit::Keep => None,
@@ -1563,15 +1577,21 @@ impl DataSourcesDialog {
         }
         let password = self.password_to_try(&item);
         let asks = password.is_none()
+            && item.gui().auth == db_core::profile::AuthMethod::UserPassword
             && !item.has_kept
             && item.profile().needs_password()
-            && item.gui().password_save == PasswordSave::Never;
+            && matches!(
+                item.gui().password_save,
+                PasswordSave::Never | PasswordSave::ForSession
+            );
         if asks {
             let this = cx.entity().downgrade();
-            let (name, user) = (item.source.name.clone(), item.profile().user.clone());
-            crate::prompt::ask(&name, &user, window, cx, move |secret, cx| {
-                if let (Some(secret), Some(this)) = (secret, this.upgrade()) {
-                    this.update(cx, |this, cx| this.run_test(item, Some(secret), cx));
+            crate::prompt::open(&item.source.clone(), None, window, cx, move |answer, cx| {
+                if let (Some(answer), Some(this)) = (answer, this.upgrade()) {
+                    let mut item = item;
+                    answer.apply(&mut item.source.profile);
+                    let secret = answer.password_override();
+                    this.update(cx, |this, cx| this.run_test(item, secret, cx));
                 }
             });
             return;
@@ -1671,10 +1691,7 @@ impl DataSourcesDialog {
         let p = item.profile();
         Some(match list {
             ListId::Driver => p.backend.id(),
-            ListId::Auth => match gui.auth {
-                db_core::profile::AuthMethod::UserPassword => "user-password",
-                db_core::profile::AuthMethod::None => "none",
-            },
+            ListId::Auth => gui.auth.id(),
             ListId::Save => gui.password_save.id(),
             ListId::ServiceKind => {
                 if p.sid.is_some() {
@@ -1716,11 +1733,15 @@ impl DataSourcesDialog {
 
     pub(crate) fn choice_label(&self, list: ListId) -> &'static str {
         let current = self.current_choice(list);
-        choices(list)
-            .into_iter()
-            .find(|(id, _)| Some(*id) == current)
-            .map(|(_, label)| label)
-            .unwrap_or("")
+        choices(
+            list,
+            self.item()
+                .map_or(Backend::Postgres, |i| i.profile().backend),
+        )
+        .into_iter()
+        .find(|(id, _)| Some(*id) == current)
+        .map(|(_, label)| label)
+        .unwrap_or("")
     }
 
     fn open_list(&mut self, list: ListId, window: &mut Window, cx: &mut Context<Self>) {
@@ -1739,10 +1760,14 @@ impl DataSourcesDialog {
             current = self.item().and_then(|i| i.profile().database.clone());
             databases.into_iter().map(|d| (d.clone(), d)).collect()
         } else {
-            choices(list)
-                .into_iter()
-                .map(|(id, label)| (id.to_owned(), label.to_owned()))
-                .collect()
+            choices(
+                list,
+                self.item()
+                    .map_or(Backend::Postgres, |i| i.profile().backend),
+            )
+            .into_iter()
+            .map(|(id, label)| (id.to_owned(), label.to_owned()))
+            .collect()
         };
         let items: Vec<MenuItem> = entries
             .into_iter()
@@ -1873,7 +1898,8 @@ impl DataSourcesDialog {
             {
                 request.renamed.push((original.clone(), name.clone()));
             }
-            let never = item.gui().password_save == PasswordSave::Never;
+            let never = item.gui().auth != db_core::profile::AuthMethod::UserPassword
+                || item.gui().password_save == PasswordSave::Never;
             let change = match &item.password {
                 PasswordEdit::Set(secret) if never || secret.is_empty() => PasswordChange::Clear,
                 PasswordEdit::Set(secret) => PasswordChange::Set(secret.clone()),

@@ -5,58 +5,18 @@ use sql_syntax::Dialect;
 
 use super::*;
 
-const PG_ANALYZE: &str = r#"[
-  {
-    "Plan": {
-      "Node Type": "Hash Join",
-      "Parallel Aware": false,
-      "Join Type": "Inner",
-      "Startup Cost": 6.70,
-      "Total Cost": 43.26,
-      "Plan Rows": 300,
-      "Actual Startup Time": 0.678,
-      "Actual Total Time": 1.221,
-      "Actual Rows": 300.00,
-      "Hash Cond": "(o.customer_id = c.id)",
-      "Plans": [
-        {
-          "Node Type": "Seq Scan",
-          "Parent Relationship": "Outer",
-          "Relation Name": "orders",
-          "Alias": "o",
-          "Startup Cost": 0.00,
-          "Total Cost": 35.75,
-          "Plan Rows": 300,
-          "Actual Startup Time": 0.045,
-          "Actual Total Time": 0.504,
-          "Actual Rows": 300.00,
-          "Filter": "(status = 'paid'::demo.order_status)"
-        },
-        {
-          "Node Type": "Hash",
-          "Parent Relationship": "Inner",
-          "Startup Cost": 5.20,
-          "Total Cost": 5.20,
-          "Plan Rows": 120,
-          "Plans": [
-            {
-              "Node Type": "Index Scan",
-              "Relation Name": "customers",
-              "Index Name": "customers_pkey",
-              "Startup Cost": 0.00,
-              "Total Cost": 5.20,
-              "Plan Rows": 120
-            }
-          ]
-        }
-      ]
-    },
-    "Planning": {"Shared Hit Blocks": 10},
-    "Planning Time": 0.827,
-    "Triggers": [],
-    "Execution Time": 1.025
-  }
-]"#;
+const PG_ANALYZE: &[&str] = &[
+    "Hash Join  (cost=6.70..43.26 rows=300 width=22) (actual time=0.678..1.221 rows=300.00 loops=1)",
+    "  Hash Cond: (o.customer_id = c.id)",
+    "  ->  Seq Scan on orders  (cost=0.00..35.75 rows=300 width=10) (actual time=0.045..0.504 rows=300.00 loops=1)",
+    "        Filter: (status = 'paid'::demo.order_status)",
+    "  ->  Hash  (cost=5.20..5.20 rows=120 width=20)",
+    "        ->  Index Scan using customers_pkey on customers  (cost=0.00..5.20 rows=120 width=8) (never executed)",
+    "Planning:",
+    "  Buffers: shared hit=10",
+    "Planning Time: 0.827 ms",
+    "Execution Time: 1.025 ms",
+];
 
 fn text_rows(lines: &[&str]) -> Vec<Vec<Value>> {
     lines
@@ -74,7 +34,7 @@ fn paths(plan: &Plan) -> Vec<(usize, String)> {
 
 #[test]
 fn a_postgres_plan_is_the_statement_over_the_plan_tree() {
-    let rows = vec![vec![Value::Json(PG_ANALYZE.into())]];
+    let rows = text_rows(PG_ANALYZE);
     let plan = Plan::from_rows(
         Dialect::Postgres,
         "select * from demo.orders o join demo.customers c on c.id = o.customer_id",
@@ -106,10 +66,7 @@ fn a_postgres_plan_is_the_statement_over_the_plan_tree() {
         (Some(300.0), Some(1.221), Some(0.678))
     );
     // What the columns do not show is the raw description.
-    assert_eq!(
-        join.raw_desc,
-        "Parallel Aware = false; Join Type = Inner; Hash Cond = (o.customer_id = c.id)"
-    );
+    assert_eq!(join.raw_desc, "Hash Cond: (o.customer_id = c.id)");
     let scan = plan.node(&[0, 0]).unwrap();
     assert_eq!(scan.params, "table: orders;");
     assert_eq!(
@@ -123,24 +80,32 @@ fn a_postgres_plan_is_the_statement_over_the_plan_tree() {
     assert!(
         root.props
             .iter()
-            .any(|(k, v)| k == "Execution Time" && v == "1.025")
+            .any(|(k, v)| k == "Execution Time" && v == "1.025 ms")
     );
     assert!(
-        root.raw_desc.starts_with("Planning = {"),
-        "{}",
-        root.raw_desc
+        root.props
+            .iter()
+            .any(|(k, v)| k == "Buffers" && v == "shared hit=10")
     );
-    // The raw text is the answer, indented.
-    assert!(
-        plan.raw.starts_with("[\n  {\n    \"Plan\": {"),
-        "{}",
-        plan.raw
+    assert_eq!(plan.node(&[0, 1, 0]).unwrap().raw_desc, "never executed");
+    assert_eq!(plan.raw, PG_ANALYZE.join("\n"));
+}
+
+#[test]
+fn quoted_names_survive_the_index_scan_description() {
+    let rows = text_rows(&[
+        r#"Index Scan using "ix on ""odd""" on "my table"  (cost=0.00..2.00 rows=1 width=4)"#,
+    ]);
+    let plan = Plan::from_rows(Dialect::Postgres, "select 1", &rows, false);
+    assert_eq!(
+        plan.node(&[0]).unwrap().params,
+        r#"table: "my table"; index: "ix on ""odd""";"#
     );
 }
 
 #[test]
 fn the_columns_are_the_ones_the_plan_has_a_value_for() {
-    let rows = vec![vec![Value::Json(PG_ANALYZE.into())]];
+    let rows = text_rows(PG_ANALYZE);
     let analyzed = Plan::from_rows(Dialect::Postgres, "select 1", &rows, true);
     let titles: Vec<_> = analyzed.columns().iter().map(|c| c.title()).collect();
     assert_eq!(
@@ -158,8 +123,7 @@ fn the_columns_are_the_ones_the_plan_has_a_value_for() {
         ]
     );
     // Without analyze the server gives no actual values.
-    let plain = r#"[{"Plan": {"Node Type": "Result", "Startup Cost": 0.0, "Total Cost": 0.01, "Plan Rows": 1}}]"#;
-    let rows = vec![vec![Value::Text(plain.into())]];
+    let rows = text_rows(&["Result  (cost=0.00..0.01 rows=1 width=4)"]);
     let plan = Plan::from_rows(Dialect::Postgres, "select 1", &rows, false);
     let titles: Vec<_> = plan.columns().iter().map(|c| c.title()).collect();
     assert_eq!(
@@ -170,7 +134,7 @@ fn the_columns_are_the_ones_the_plan_has_a_value_for() {
 
 #[test]
 fn a_collapsed_node_hides_its_descendants() {
-    let rows = vec![vec![Value::Json(PG_ANALYZE.into())]];
+    let rows = text_rows(PG_ANALYZE);
     let plan = Plan::from_rows(Dialect::Postgres, "select 1", &rows, true);
     let mut collapsed = HashSet::new();
     collapsed.insert(vec![0, 1]);
@@ -192,9 +156,7 @@ fn a_collapsed_node_hides_its_descendants() {
 
 #[test]
 fn the_statement_names_the_root() {
-    let rows = vec![vec![Value::Text(
-        r#"[{"Plan": {"Node Type": "Result"}}]"#.into(),
-    )]];
+    let rows = text_rows(&["Result  (cost=0.00..0.01 rows=1 width=4)"]);
     let label = |sql: &str| {
         Plan::from_rows(Dialect::Postgres, sql, &rows, false)
             .root

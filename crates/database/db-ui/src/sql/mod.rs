@@ -72,7 +72,7 @@ pub(crate) fn publish_model(
 /// The rows the editor's context menu gets for a SQL file attached to a data
 /// source, a console or a file (the reference's `Explain Plan` group and
 /// `Execute`, after Evaluate Expression): Explain Plan > Explain Plan,
-/// Explain Analyze; Execute. A file with no data source has none.
+/// Explain Analyse; Execute. A file with no data source has none.
 fn context_menu(hub: &Hub, path: &std::path::Path) -> Vec<MenuItem> {
     if hub.resolve(path).data_source.is_none() {
         return Vec::new();
@@ -81,8 +81,10 @@ fn context_menu(hub: &Hub, path: &std::path::Path) -> Vec<MenuItem> {
         MenuItem::submenu(
             "Explain Plan",
             vec![
-                MenuItem::action("Explain Plan", crate::console::ExplainPlan),
-                MenuItem::action("Explain Analyze", crate::console::ExplainAnalyze),
+                MenuItem::action("Explain Plan", crate::console::ExplainPlan)
+                    .icon(crate::icons::PLAN),
+                MenuItem::action("Explain Analyse", crate::console::ExplainAnalyze)
+                    .icon(crate::icons::PLAN),
             ],
         )
         .icon(crate::icons::PLAN),

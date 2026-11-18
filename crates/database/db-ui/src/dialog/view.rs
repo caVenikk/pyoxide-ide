@@ -908,7 +908,7 @@ impl DataSourcesDialog {
                 )
                 .into_any_element(),
             ));
-            if gui.auth == db_core::profile::AuthMethod::UserPassword {
+            if gui.auth != db_core::profile::AuthMethod::None || dialect == Dialect::Postgres {
                 rows.push((
                     ROW_GAP,
                     Self::pair(
@@ -919,6 +919,8 @@ impl DataSourcesDialog {
                     )
                     .into_any_element(),
                 ));
+            }
+            if gui.auth == db_core::profile::AuthMethod::UserPassword {
                 rows.push((
                     ROW_GAP,
                     Self::pair(

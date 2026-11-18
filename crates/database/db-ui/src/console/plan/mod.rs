@@ -2,7 +2,7 @@
 //! as a tree of operations with their estimates and, after an analyze, the
 //! measured rows and times, next to the raw text of the answer. The
 //! statements that ask come from `sql_syntax::explain_statements`; the
-//! parsers read their results (PostgreSQL `EXPLAIN (FORMAT JSON)`, SQLite
+//! parsers read their results (PostgreSQL `EXPLAIN (FORMAT TEXT)`, SQLite
 //! `EXPLAIN QUERY PLAN`, Oracle `DBMS_XPLAN.DISPLAY`), the view draws the
 //! tree and the properties of the selected node.
 
@@ -132,7 +132,6 @@ impl Plan {
             Dialect::Generic => None,
         };
         let raw = match (dialect, &parsed) {
-            (Dialect::Postgres, _) => parse::pretty_json(&text),
             (Dialect::Sqlite, Some(root)) => parse::sqlite_text(root),
             _ => text,
         };

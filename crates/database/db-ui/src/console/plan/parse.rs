@@ -5,7 +5,6 @@
 use std::collections::HashMap;
 
 use db_core::{Row, Value};
-use serde_json::Value as Json;
 use sql_syntax::{Dialect, TokenKind};
 
 use super::{NodeKind, PlanNode};
@@ -31,13 +30,6 @@ pub(super) fn statement_label(statement: &str, dialect: Dialect) -> String {
     }
 }
 
-pub(super) fn pretty_json(text: &str) -> String {
-    serde_json::from_str::<Json>(text)
-        .ok()
-        .and_then(|v| serde_json::to_string_pretty(&v).ok())
-        .unwrap_or_else(|| text.to_owned())
-}
-
 fn root(label: &str) -> PlanNode {
     PlanNode {
         kind: NodeKind::Statement,
@@ -49,120 +41,154 @@ fn root(label: &str) -> PlanNode {
 
 // ---- PostgreSQL -------------------------------------------------------------------
 
-/// `[{"Plan": {...}, "Planning Time": ..., "Execution Time": ...}]`: the
-/// statement is the root, the plan its child; what the document says
-/// besides the plan is the root's.
+/// Rebuild the tree from the same text rows displayed in the Raw grid.
 pub(super) fn postgres(text: &str, label: &str) -> Option<PlanNode> {
-    let doc: Json = serde_json::from_str(text).ok()?;
-    let top = match &doc {
-        Json::Array(items) => items.first()?,
-        other => other,
-    };
-    let top = top.as_object()?;
-    let plan = top.get("Plan")?;
-    let mut node = root(label);
-    for (key, value) in top.iter().filter(|(k, _)| *k != "Plan") {
-        node.props.push((key.clone(), json_text(value)));
+    let mut statement = root(label);
+    let mut stack: Vec<(usize, PlanNode)> = Vec::new();
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        let indent = line.len() - trimmed.len();
+        let arrow = trimmed.strip_prefix("->");
+        let body = arrow.unwrap_or(trimmed).trim_start();
+        let operation = (arrow.is_some() || stack.is_empty() && indent == 0)
+            .then(|| pg_text_node(body))
+            .flatten();
+        if let Some(node) = operation {
+            while stack.last().is_some_and(|(depth, _)| *depth >= indent) {
+                finish_node(&mut stack, &mut statement);
+            }
+            stack.push((indent, node));
+        } else if !body.is_empty() {
+            if indent == 0 {
+                while !stack.is_empty() {
+                    finish_node(&mut stack, &mut statement);
+                }
+            }
+            let target = stack
+                .iter_mut()
+                .rev()
+                .find(|(depth, _)| *depth < indent)
+                .map(|(_, node)| node)
+                .unwrap_or(&mut statement);
+            let (key, value) = body.split_once(':').unwrap_or(("Detail", body));
+            target.props.push((key.into(), value.trim().into()));
+            if !target.raw_desc.is_empty() {
+                target.raw_desc.push_str("; ");
+            }
+            target.raw_desc.push_str(body);
+        }
     }
-    node.raw_desc = node.props[1..]
-        .iter()
-        .map(|(k, v)| format!("{k} = {v}"))
-        .collect::<Vec<_>>()
-        .join("; ");
-    node.children.push(pg_node(plan)?);
-    Some(node)
+    while !stack.is_empty() {
+        finish_node(&mut stack, &mut statement);
+    }
+    (!statement.children.is_empty()).then_some(statement)
 }
 
-/// The properties a column of the table shows already.
-const PG_SHOWN: &[&str] = &[
-    "Node Type",
-    "Relation Name",
-    "Index Name",
-    "CTE Name",
-    "Function Name",
-    "Plan Rows",
-    "Total Cost",
-    "Startup Cost",
-    "Actual Rows",
-    "Actual Total Time",
-    "Actual Startup Time",
-    "Plans",
-];
+fn finish_node(stack: &mut Vec<(usize, PlanNode)>, root: &mut PlanNode) {
+    if let Some((_, node)) = stack.pop() {
+        stack
+            .last_mut()
+            .map(|(_, parent)| parent)
+            .unwrap_or(root)
+            .children
+            .push(node);
+    }
+}
 
-fn pg_node(value: &Json) -> Option<PlanNode> {
-    let obj = value.as_object()?;
-    let text = |k: &str| obj.get(k).and_then(Json::as_str);
-    let num = |k: &str| obj.get(k).and_then(Json::as_f64);
-    let node_type = text("Node Type")?;
-    let (kind, operation) = pg_operation(node_type, text("Operation"));
+// A quoted index can itself contain the words " on ".
+fn pg_split_name<'a>(name: &'a str, separator: &str) -> (&'a str, &'a str) {
+    let mut quoted = false;
+    for (i, ch) in name.char_indices() {
+        if ch == '"' {
+            quoted = !quoted;
+        } else if !quoted && name[i..].starts_with(separator) {
+            return (&name[..i], &name[i + separator.len()..]);
+        }
+    }
+    (name, "")
+}
+
+fn pg_text_node(line: &str) -> Option<PlanNode> {
+    let (name, metrics) = line.rsplit_once("  (cost=")?;
+    let (estimated, actual) = metrics.split_once(')')?;
+    let name = name.trim();
+    let (operation, relation) = pg_split_name(name, " on ");
+    let (operation, index) = pg_split_name(operation, " using ");
+    let (kind, operation) = pg_operation(operation);
+    let mut props = vec![("Operation".into(), operation.clone())];
     let mut params = Vec::new();
-    if let Some(t) = text("Relation Name") {
-        params.push(format!("table: {t};"));
+    if !relation.is_empty() {
+        props.push(("Relation".into(), relation.into()));
+        params.push(format!("table: {relation};"));
     }
-    if let Some(t) = text("Index Name") {
-        params.push(format!("index: {t};"));
+    if !index.is_empty() {
+        props.push(("Index".into(), index.into()));
+        params.push(format!("index: {index};"));
     }
-    if let Some(t) = text("CTE Name") {
-        params.push(format!("cte: {t};"));
-    }
-    if let Some(t) = text("Function Name") {
-        params.push(format!("function: {t};"));
-    }
-    let mut props = vec![("Operation".to_owned(), operation.clone())];
-    props.extend(
-        obj.iter()
-            .filter(|(k, _)| k.as_str() != "Plans")
-            .map(|(k, v)| (k.clone(), json_text(v))),
-    );
-    let raw_desc = obj
-        .iter()
-        .filter(|(k, _)| !PG_SHOWN.contains(&k.as_str()))
-        .map(|(k, v)| format!("{k} = {}", json_text(v)))
-        .collect::<Vec<_>>()
-        .join("; ");
-    let children = obj
-        .get("Plans")
-        .and_then(Json::as_array)
-        .map(|plans| plans.iter().filter_map(pg_node).collect())
-        .unwrap_or_default();
-    Some(PlanNode {
+    let mut node = PlanNode {
         kind,
         operation,
         params: params.join(" "),
-        rows: num("Plan Rows"),
-        actual_rows: num("Actual Rows"),
-        total_cost: num("Total Cost"),
-        startup_cost: num("Startup Cost"),
-        actual_total_time: num("Actual Total Time"),
-        actual_startup_time: num("Actual Startup Time"),
-        raw_desc,
         props,
-        children,
-    })
+        ..Default::default()
+    };
+    if actual.trim() == "(never executed)" {
+        node.props
+            .push(("Execution".into(), "never executed".into()));
+        node.raw_desc = "never executed".into();
+    }
+    let (cost, estimates) = estimated.split_once(' ')?;
+    (node.startup_cost, node.total_cost) = pg_range(cost);
+    node.props.push(("Cost".into(), cost.into()));
+    for (key, value) in estimates
+        .split_whitespace()
+        .filter_map(|field| field.split_once('='))
+    {
+        if key == "rows" {
+            node.rows = value.parse().ok();
+        }
+        node.props.push((key.into(), value.into()));
+    }
+    if let Some(metrics) = actual
+        .trim()
+        .strip_prefix("(actual ")
+        .and_then(|s| s.strip_suffix(')'))
+    {
+        for (key, value) in metrics
+            .split_whitespace()
+            .filter_map(|field| field.split_once('='))
+        {
+            match key {
+                "time" => (node.actual_startup_time, node.actual_total_time) = pg_range(value),
+                "rows" => node.actual_rows = value.parse().ok(),
+                _ => {}
+            }
+            node.props.push((format!("actual {key}"), value.into()));
+        }
+    }
+    Some(node)
+}
+
+fn pg_range(value: &str) -> (Option<f64>, Option<f64>) {
+    value
+        .split_once("..")
+        .map(|(a, b)| (a.parse().ok(), b.parse().ok()))
+        .unwrap_or_default()
 }
 
 /// The name of an operation as the table shows it, and its kind.
-fn pg_operation(node_type: &str, modify: Option<&str>) -> (NodeKind, String) {
+fn pg_operation(node_type: &str) -> (NodeKind, String) {
     match node_type {
         "Seq Scan" => (NodeKind::Scan, "Full Scan (Seq Scan)".into()),
         "Hash" => (NodeKind::Transform, "Transformation (Hash)".into()),
         "Sort" | "Incremental Sort" | "Materialize" | "Memoize" => {
             (NodeKind::Transform, node_type.into())
         }
-        "ModifyTable" => (NodeKind::Other, modify.unwrap_or("Modify Table").to_owned()),
         t if t.starts_with("Index") => (NodeKind::IndexScan, format!("Index Scan ({t})")),
         t if t.starts_with("Bitmap") => (NodeKind::IndexScan, format!("Bitmap Scan ({t})")),
         t if t.ends_with("Join") || t == "Nested Loop" => (NodeKind::Join, t.into()),
         t if t.ends_with("Scan") => (NodeKind::Scan, format!("Scan ({t})")),
         t => (NodeKind::Other, t.into()),
-    }
-}
-
-/// A JSON value as one line: text as it is, anything else as JSON.
-fn json_text(value: &Json) -> String {
-    match value {
-        Json::String(s) => s.clone(),
-        other => other.to_string(),
     }
 }
 

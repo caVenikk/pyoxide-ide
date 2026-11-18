@@ -614,23 +614,23 @@ impl SqlWidget {
         cx.notify();
     }
 
-    /// The menu of the Explain arrow: Explain Plan and Explain Analyze.
+    /// The menu of the Explain arrow: Explain Plan and Explain Analyse.
     fn open_explain_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.menu.is_some() {
-            return;
-        }
-        self.popup_anchor.set(self.explain_bounds.get());
         let items = vec![
-            MenuItem::action("Explain Plan", crate::console::ExplainPlan),
-            MenuItem::action("Explain Analyze", crate::console::ExplainAnalyze),
+            MenuItem::action("Explain Plan", crate::console::ExplainPlan).icon(icons::PLAN),
+            MenuItem::action("Explain Analyse", crate::console::ExplainAnalyze).icon(icons::PLAN),
         ];
-        let menu = ContextMenu::build(items, window, cx);
-        let subscription = cx.subscribe(&menu, |this, _, _: &DismissEvent, cx| {
-            this.menu = None;
-            cx.notify();
-        });
-        self.menu = Some((menu, subscription));
-        cx.notify();
+        self.show_items(
+            items,
+            self.explain_bounds.get(),
+            PopupOptions {
+                min_width: Some(148.0),
+                row_height: Some(24.0),
+                ..Default::default()
+            },
+            window,
+            cx,
+        );
     }
 
     /// The active file lies in a subfolder of the project (a folder
@@ -1026,36 +1026,54 @@ impl SqlWidget {
             return vec![execute];
         }
         let explain_bounds = self.explain_bounds.clone();
+        let explain_hover = theme.color(UiRole::Hover);
+        let explain_open = self.menu.is_some() && self.popup_anchor.get() == explain_bounds.get();
         let explain = div()
+            .id("sql-explain-split")
             .relative()
             .flex()
             .flex_none()
-            .flex_row()
             .items_center()
+            .w(px(28.))
+            .h(px(24.))
+            .rounded_md()
+            .when(running, |d| d.opacity(ui::components::DISABLED_ALPHA))
+            .when(explain_open, |d| d.bg(explain_hover))
+            .when(!running, |d| d.hover(move |s| s.bg(explain_hover)))
             .child(
-                button("sql-explain", icons::PLAN, "Explain Plan", !running).when(!running, |d| {
-                    d.on_click(|_, window, cx| {
-                        window.dispatch_action(Box::new(crate::console::ExplainPlan), cx)
-                    })
-                }),
+                div()
+                    .id("sql-explain")
+                    .debug_selector(|| "sql-explain".into())
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .w(px(20.))
+                    .h_full()
+                    .child(Icon::new(icons::PLAN).size(px(16.)))
+                    .tooltip(Tooltip::text("Explain Plan", None))
+                    .when(!running, |d| {
+                        d.on_click(|_, window, cx| {
+                            window.dispatch_action(Box::new(crate::console::ExplainPlan), cx)
+                        })
+                    }),
             )
             .child(
-                ui::components::icon_button(
-                    "sql-explain-menu",
-                    IconName::CHEVRON_DOWN,
-                    px(14.0),
-                    px(12.0),
-                    false,
-                    cx,
-                )
-                .debug_selector(|| "sql-explain-menu".to_owned())
-                .tooltip(Tooltip::text("Explain Plan and Explain Analyze", None))
-                .when(running, |d| d.opacity(ui::components::DISABLED_ALPHA))
-                .when(!running, |d| {
-                    d.on_click(
-                        cx.listener(|this, _, window, cx| this.open_explain_menu(window, cx)),
-                    )
-                }),
+                div()
+                    .id("sql-explain-menu")
+                    .debug_selector(|| "sql-explain-menu".into())
+                    .flex()
+                    .items_end()
+                    .justify_center()
+                    .w(px(8.))
+                    .h_full()
+                    .pb(px(4.))
+                    .child(Icon::new(IconName::CHEVRON_DOWN).size(px(8.)))
+                    .tooltip(Tooltip::text("Explain Plan / Explain Analyse", None))
+                    .when(!running, |d| {
+                        d.on_click(
+                            cx.listener(|this, _, window, cx| this.open_explain_menu(window, cx)),
+                        )
+                    }),
             )
             .child(
                 canvas(move |b, _, _| explain_bounds.set(b), |_, _, _, _| {})

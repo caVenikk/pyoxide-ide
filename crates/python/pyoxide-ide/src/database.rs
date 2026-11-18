@@ -9,9 +9,12 @@
 //! Connecting runs on a small runtime of its own; dropping the module's
 //! future aborts it.
 
+use db_ui::prompt::Answer;
+use db_ui::store::CredentialSession;
+use std::collections::HashMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use db_core::schema::SchemaInfo;
 use db_core::{
@@ -144,6 +147,16 @@ fn keeps_in_store(save: PasswordSave) -> bool {
     save == PasswordSave::Forever
 }
 
+/// Login secrets are stored only by the user/password authentication mode.
+fn login_save(profile: &Profile) -> PasswordSave {
+    let gui = profile.gui_options();
+    if gui.auth == db_core::profile::AuthMethod::UserPassword {
+        gui.password_save
+    } else {
+        PasswordSave::Never
+    }
+}
+
 /// What makes a [`DbService`]: the secret stores and the environment.
 #[derive(Clone)]
 struct Parts {
@@ -167,10 +180,25 @@ impl Parts {
     }
 }
 
+/// A missing entry uses the profile's configured credentials. A rejected entry
+/// asks again without reading the credential store or changing it.
+#[derive(Clone)]
+enum PromptCredential {
+    Entered {
+        profile: Box<Profile>,
+        answer: Answer,
+    },
+    Rejected,
+}
+
+type PromptCredentials = Arc<Mutex<HashMap<(PathBuf, String), PromptCredential>>>;
+
 /// The connections of a project's data sources (the tree's sessions): each
 /// opens with a service that asks the configured store only when that data
 /// source saves its password "Forever".
 struct ProjectConnections {
+    session: CredentialSession,
+    credentials: PromptCredentials,
     parts: Parts,
     project: PathBuf,
 }
@@ -182,22 +210,56 @@ impl ConnectionSource for ProjectConnections {
         data_source: &DataSourceId,
         purpose: Purpose,
     ) -> db_core::Result<Arc<dyn Connection>> {
-        let use_store = ProfilesFile::load(&profiles_path(&self.project))
-            .ok()
-            .and_then(|f| {
-                f.profiles
-                    .get(data_source.as_str())
-                    .map(|p| keeps_in_store(p.gui_options().password_save))
-            })
-            .unwrap_or(false);
-        let service = self.parts.service(&self.project, use_store);
-        ConnectionSource::open(&service, data_source, purpose).await
+        let name = data_source.as_str();
+        let mut profile = ProfilesFile::load(&profiles_path(&self.project))?
+            .get(name)?
+            .clone();
+        let service = self.parts.service(
+            &self.project,
+            keeps_in_store(profile.gui_options().password_save),
+        );
+        let credential = self
+            .credentials
+            .lock()
+            .unwrap()
+            .get(&(self.project.clone(), name.to_owned()))
+            .cloned();
+        let answer = match self.session.answer() {
+            Some(answer) => Some(answer),
+            None => match credential {
+                Some(PromptCredential::Entered {
+                    profile: original,
+                    answer,
+                }) if answer.save != PasswordSave::ForSession
+                    && db_ui::store::same_connection(&original, &profile) =>
+                {
+                    Some(answer)
+                }
+                Some(PromptCredential::Rejected) => {
+                    return Err(Error::new(
+                        ErrorKind::Auth,
+                        "Connection credentials need to be entered again",
+                    ));
+                }
+                _ => None,
+            },
+        };
+        let password = answer.and_then(|answer| {
+            answer.apply(&mut profile);
+            answer.password_override()
+        });
+        let opened = service
+            .open_profile_for(name.to_owned(), profile, password, Some(purpose))
+            .await?;
+        Ok(Arc::from(opened.conn))
     }
 }
 
 /// The product's store: data sources per project, the configured secret
 /// store and the passwords kept until restart.
 pub struct ProjectStore {
+    save_lock: Mutex<()>,
+    credentials: PromptCredentials,
     store: Arc<dyn SecretStore>,
     memory: Arc<MemoryStore>,
     env: EnvLookup,
@@ -215,6 +277,8 @@ impl ProjectStore {
         Self {
             store,
             memory: Arc::new(MemoryStore::default()),
+            credentials: Default::default(),
+            save_lock: Default::default(),
             env,
         }
     }
@@ -235,6 +299,102 @@ impl ProjectStore {
             store: self.store.clone(),
             env: self.env.clone(),
         }
+    }
+
+    /// A dialog may test an unsaved edit. A credential entered for a saved
+    /// source only applies to that source as it was when the user supplied it.
+    fn with_prompt_answer(
+        &self,
+        project: &Path,
+        mut source: DataSource,
+        password: Option<Secret>,
+    ) -> (DataSource, Option<Secret>) {
+        if password.is_none()
+            && let Some(PromptCredential::Entered { profile, answer }) = self
+                .credentials
+                .lock()
+                .unwrap()
+                .get(&(project.to_owned(), source.name.clone()))
+            && answer.save != PasswordSave::ForSession
+            && db_ui::store::same_connection(profile, &source.profile)
+        {
+            answer.apply(&mut source.profile);
+            return (source, answer.password_override());
+        }
+        (source, password)
+    }
+
+    fn save_changes(&self, project: &Path, request: SaveRequest) -> Result<(), String> {
+        // How each data source saved its password before this save, by the
+        // name it has now (a renamed one by its old name).
+        let before = ProfilesFile::load(&profiles_path(project)).unwrap_or_default();
+        let saved_as = |name: &str| {
+            let old = request
+                .renamed
+                .iter()
+                .find(|(_, new)| new == name)
+                .map_or(name, |(old, _)| old.as_str());
+            before.profiles.get(old).map(login_save)
+        };
+        let mut file = ProfilesFile::default();
+        for source in &request.sources {
+            db_service::profiles::validate_name(&source.name).map_err(|e| e.message)?;
+            file.profiles
+                .insert(source.name.clone(), source.profile.clone());
+        }
+        file.save(&profiles_path(project)).map_err(|e| e.message)?;
+        self.credentials.lock().unwrap().retain(|(root, name), _| {
+            root != project
+                || (before
+                    .profiles
+                    .get(name)
+                    .zip(file.profiles.get(name))
+                    .is_some_and(|(previous, next)| {
+                        db_ui::store::same_connection(previous, next)
+                            && previous.gui_options().password_save
+                                == next.gui_options().password_save
+                    })
+                    && !request
+                        .passwords
+                        .iter()
+                        .any(|(n, change)| n == name && !matches!(change, PasswordChange::Keep)))
+        });
+        for (old, new) in &request.renamed {
+            let in_store = saved_as(new).is_some_and(keeps_in_store);
+            self.move_secret(old, new, in_store)?;
+        }
+        for name in &request.removed {
+            let in_store = before
+                .profiles
+                .get(name)
+                .is_some_and(|p| keeps_in_store(login_save(p)));
+            self.delete_secrets(name, in_store)?;
+        }
+        for (name, change) in &request.passwords {
+            let now = request
+                .sources
+                .iter()
+                .find(|s| &s.name == name)
+                .map(|s| login_save(&s.profile))
+                .unwrap_or_default();
+            self.change_password(name, saved_as(name), now, change)?;
+            if now == PasswordSave::ForSession
+                && let PasswordChange::Set(password) = change
+                && let Some(source) = request.sources.iter().find(|s| &s.name == name)
+            {
+                self.hold_answer(
+                    project,
+                    source,
+                    Answer {
+                        user: source.profile.user.clone(),
+                        auth: source.profile.gui_options().auth,
+                        password: password.clone(),
+                        save: now,
+                    },
+                );
+            }
+        }
+        Ok(())
     }
 
     /// Moves the secrets of a renamed data source; the configured store is
@@ -303,7 +463,7 @@ impl ProjectStore {
                         store.delete(&secret_service(), &account).map_err(text)?;
                     }
                 }
-                PasswordSave::Never => {
+                PasswordSave::ForSession | PasswordSave::Never => {
                     memory.delete(&secret_service(), &account).map_err(text)?;
                     if was_stored {
                         store.delete(&secret_service(), &account).map_err(text)?;
@@ -341,7 +501,7 @@ impl ProjectStore {
                         store.delete(&secret_service(), &account).map_err(text)?;
                     }
                 }
-                PasswordSave::Never => {
+                PasswordSave::ForSession | PasswordSave::Never => {
                     memory.delete(&secret_service(), &account).map_err(text)?;
                     if was_stored {
                         store.delete(&secret_service(), &account).map_err(text)?;
@@ -397,6 +557,16 @@ fn failure(dialect: Dialect, e: Error) -> Failure {
 }
 
 impl DataSourceStore for ProjectStore {
+    fn password_settings_file(&self) -> Option<(PathBuf, String)> {
+        let defaults = secrets::SecretsConfig::default().to_toml().ok()?;
+        Some((
+            secrets::config::config_path(&self.env),
+            format!(
+                "# Password storage settings take effect after restarting the IDE.\n{defaults}"
+            ),
+        ))
+    }
+
     fn load(&self, project: &Path) -> Result<Vec<DataSource>, String> {
         let file = ProfilesFile::load(&profiles_path(project)).map_err(|e| e.message)?;
         Ok(file
@@ -407,51 +577,38 @@ impl DataSourceStore for ProjectStore {
     }
 
     fn save(&self, project: &Path, request: SaveRequest) -> Result<(), String> {
-        // How each data source saved its password before this save, by the
-        // name it has now (a renamed one by its old name).
-        let before = ProfilesFile::load(&profiles_path(project)).unwrap_or_default();
-        let saved_as = |name: &str| {
-            let old = request
-                .renamed
-                .iter()
-                .find(|(_, new)| new == name)
-                .map_or(name, |(old, _)| old.as_str());
-            before
-                .profiles
-                .get(old)
-                .map(|p| p.gui_options().password_save)
-        };
-        let mut file = ProfilesFile::default();
-        for source in &request.sources {
-            db_service::profiles::validate_name(&source.name).map_err(|e| e.message)?;
-            file.profiles
-                .insert(source.name.clone(), source.profile.clone());
+        let _lock = self.save_lock.lock().unwrap();
+        self.save_changes(project, request)
+    }
+
+    fn save_prompt(
+        &self,
+        project: &Path,
+        before: &DataSource,
+        after: &DataSource,
+        change: PasswordChange,
+    ) -> Result<(), String> {
+        let _lock = self.save_lock.lock().unwrap();
+        let request = SaveRequest::prompt_update(self.load(project)?, before, after, change)?;
+        self.save_changes(project, request)
+    }
+    fn clear_rejected(&self, project: &Path, name: &str) {
+        let key = (project.to_owned(), name.to_owned());
+        let mut held = self.credentials.lock().unwrap();
+        if matches!(held.get(&key), Some(PromptCredential::Rejected)) {
+            held.remove(&key);
         }
-        file.save(&profiles_path(project)).map_err(|e| e.message)?;
-        for (old, new) in &request.renamed {
-            let in_store = saved_as(new).is_some_and(keeps_in_store);
-            self.move_secret(old, new, in_store)?;
-        }
-        for name in &request.removed {
-            let in_store = before
-                .profiles
-                .get(name)
-                .is_some_and(|p| keeps_in_store(p.gui_options().password_save));
-            self.delete_secrets(name, in_store)?;
-        }
-        for (name, change) in &request.passwords {
-            let now = request
-                .sources
-                .iter()
-                .find(|s| &s.name == name)
-                .map(|s| s.profile.gui_options().password_save)
-                .unwrap_or_default();
-            self.change_password(name, saved_as(name), now, change)?;
-        }
-        Ok(())
     }
 
     fn has_password(&self, project: &Path, name: &str) -> bool {
+        if let Some(entry) = self
+            .credentials
+            .lock()
+            .unwrap()
+            .get(&(project.to_owned(), name.to_owned()))
+        {
+            return matches!(entry, PromptCredential::Entered { answer, .. } if answer.auth == db_core::profile::AuthMethod::UserPassword);
+        }
         let account = SecretKind::Password.account(name);
         if matches!(self.memory.get(&secret_service(), &account), Ok(Some(_))) {
             return true;
@@ -460,13 +617,31 @@ impl DataSourceStore for ProjectStore {
         // the configured store; for any other the OS is not asked.
         let forever = ProfilesFile::load(&profiles_path(project))
             .ok()
-            .and_then(|f| f.profiles.get(name).map(|p| p.gui_options().password_save))
-            .is_some_and(keeps_in_store);
+            .and_then(|f| f.profiles.get(name).map(|p| p.gui_options()))
+            .is_some_and(|gui| {
+                gui.auth == db_core::profile::AuthMethod::UserPassword
+                    && keeps_in_store(gui.password_save)
+            });
         forever && matches!(self.store.get(&secret_service(), &account), Ok(Some(_)))
     }
 
     fn needs_prompt(&self, project: &Path, source: &DataSource) -> bool {
+        if let Some(entry) = self
+            .credentials
+            .lock()
+            .unwrap()
+            .get(&(project.to_owned(), source.name.clone()))
+        {
+            return matches!(entry, PromptCredential::Rejected);
+        }
         let profile = &source.profile;
+        if profile.gui_options().auth == db_core::profile::AuthMethod::Pgpass {
+            // The resolver for pgpass never accesses the configured secret store.
+            return self
+                .service_with(project, false)
+                .params_for(&source.name, profile)
+                .is_err();
+        }
         if !profile.needs_password() {
             return false;
         }
@@ -480,6 +655,28 @@ impl DataSourceStore for ProjectStore {
         !in_env && !self.has_password(project, &source.name)
     }
 
+    fn needs_session_prompt(
+        &self,
+        project: &Path,
+        source: &DataSource,
+        session: &CredentialSession,
+    ) -> bool {
+        if session.answer().is_some() {
+            return false;
+        }
+        // A password entered in Data Sources before a session exists is
+        // claimed once by the first handle for that project and source.
+        let key = (project.to_owned(), source.name.clone());
+        let mut held = self.credentials.lock().unwrap();
+        if matches!(held.get(&key), Some(PromptCredential::Entered {profile, answer}) if answer.save == PasswordSave::ForSession && db_ui::store::same_connection(profile,&source.profile))
+            && let Some(PromptCredential::Entered { answer, .. }) = held.remove(&key)
+        {
+            return !session.hold(session.generation(), answer);
+        }
+        drop(held);
+        self.needs_prompt(project, source)
+    }
+
     fn hold_password(&self, _: &Path, name: &str, password: Secret) {
         // A failing memory store is a store that holds nothing: the
         // connection then asks again.
@@ -490,7 +687,31 @@ impl DataSourceStore for ProjectStore {
         );
     }
 
-    fn release_password(&self, _: &Path, name: &str) {
+    fn hold_answer(&self, project: &Path, source: &DataSource, answer: Answer) {
+        self.credentials.lock().unwrap().insert(
+            (project.to_owned(), source.name.clone()),
+            PromptCredential::Entered {
+                profile: Box::new(source.profile.clone()),
+                answer,
+            },
+        );
+    }
+
+    fn reject_password(&self, project: &Path, name: &str) {
+        self.release_password(project, name);
+        self.credentials.lock().unwrap().insert(
+            (project.to_owned(), name.to_owned()),
+            PromptCredential::Rejected,
+        );
+    }
+
+    fn release_password(&self, project: &Path, name: &str) {
+        let mut held = self.credentials.lock().unwrap();
+        let key = (project.to_owned(), name.to_owned());
+        if matches!(held.get(&key), Some(PromptCredential::Entered { .. })) {
+            held.remove(&key);
+        }
+        drop(held);
         let _ = self
             .memory
             .delete(&secret_service(), &SecretKind::Password.account(name));
@@ -502,6 +723,7 @@ impl DataSourceStore for ProjectStore {
         source: DataSource,
         password: Option<Secret>,
     ) -> BoxFuture<Result<ServerInfo, Failure>> {
+        let (source, password) = self.with_prompt_answer(project, source, password);
         let svc = self.service(project, &source.profile);
         spawn(async move {
             let dialect = source.profile.dialect();
@@ -524,6 +746,7 @@ impl DataSourceStore for ProjectStore {
         source: DataSource,
         password: Option<Secret>,
     ) -> BoxFuture<Result<Vec<SchemaInfo>, Failure>> {
+        let (source, password) = self.with_prompt_answer(project, source, password);
         let svc = self.service(project, &source.profile);
         spawn(async move {
             let dialect = source.profile.dialect();
@@ -539,6 +762,7 @@ impl DataSourceStore for ProjectStore {
         source: DataSource,
         password: Option<Secret>,
     ) -> BoxFuture<Result<Vec<String>, Failure>> {
+        let (source, password) = self.with_prompt_answer(project, source, password);
         let svc = self.service(project, &source.profile);
         spawn(async move {
             let dialect = source.profile.dialect();
@@ -549,7 +773,17 @@ impl DataSourceStore for ProjectStore {
     }
 
     fn connections(&self, project: &Path) -> Arc<dyn ConnectionSource> {
+        self.session_connections(project, CredentialSession::default())
+    }
+
+    fn session_connections(
+        &self,
+        project: &Path,
+        session: CredentialSession,
+    ) -> Arc<dyn ConnectionSource> {
         Arc::new(ProjectConnections {
+            session,
+            credentials: self.credentials.clone(),
             parts: self.parts(),
             project: project.to_owned(),
         })
@@ -811,6 +1045,225 @@ mod tests {
             let _ = futures_block_on(store.schemas(root, source.clone(), password.clone()));
             let _ = futures_block_on(store.databases(root, source.clone(), password));
         }
+    }
+
+    #[test]
+    fn prompt_credentials_follow_the_project_and_current_profile() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let (store, os) = store();
+        let mut source = unreachable_source("local", PasswordSave::Forever);
+        let save = |source: &DataSource, change| {
+            store
+                .save(
+                    root,
+                    SaveRequest {
+                        sources: vec![source.clone()],
+                        passwords: vec![("local".into(), change)],
+                        ..Default::default()
+                    },
+                )
+                .unwrap()
+        };
+        save(&source, PasswordChange::Set(Secret::new("refused")));
+        store.reject_password(root, "local");
+        assert!(store.needs_prompt(root, &source));
+        assert!(os_password(&os, "local").is_some());
+        source.profile.gui.as_mut().unwrap().password_save = PasswordSave::Never;
+        save(&source, PasswordChange::Clear);
+        let answer = Answer {
+            user: "entered".into(),
+            auth: db_core::profile::AuthMethod::UserPassword,
+            password: Secret::new("typed"),
+            save: PasswordSave::Never,
+        };
+        store.hold_answer(root, &source, answer);
+        assert!(!store.needs_prompt(root, &source));
+        assert!(os_password(&os, "local").is_none());
+        let other = tempfile::tempdir().unwrap();
+        assert!(store.needs_prompt(other.path(), &source));
+        assert!(ProjectStore::new(os, Arc::new(|_| None)).needs_prompt(root, &source));
+        source.profile.host = "another.invalid".into();
+        save(&source, PasswordChange::Keep);
+        assert!(store.needs_prompt(root, &source));
+        store.reject_password(root, "local");
+        store
+            .save(
+                root,
+                SaveRequest {
+                    removed: vec!["local".into()],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        source.profile.gui.as_mut().unwrap().password_save = PasswordSave::Forever;
+        save(&source, PasswordChange::Set(Secret::new("replacement")));
+        assert!(!store.needs_prompt(root, &source));
+    }
+
+    #[test]
+    fn session_settings_secrets_are_claimed_by_one_handle() {
+        let dir = tempfile::tempdir().unwrap();
+        let os = Counting::default();
+        let store = ProjectStore::new(Arc::new(os.clone()), Arc::new(|_| None));
+        let source = unreachable_source("local", PasswordSave::ForSession);
+        store
+            .save(
+                dir.path(),
+                SaveRequest {
+                    sources: vec![source.clone()],
+                    passwords: vec![("local".into(), PasswordChange::Set(Secret::new("entered")))],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let first = CredentialSession::default();
+        let other = CredentialSession::default();
+        assert!(!store.needs_session_prompt(dir.path(), &source, &first));
+        assert!(store.needs_session_prompt(dir.path(), &source, &other));
+        let separate = tempfile::tempdir().unwrap();
+        assert!(store.needs_session_prompt(separate.path(), &source, &other));
+        let generation = first.generation();
+        let answer = first.answer().unwrap();
+        first.clear();
+        assert!(!first.hold(generation, answer));
+        assert!(store.needs_session_prompt(dir.path(), &source, &first));
+        assert_eq!(os.calls(), 0);
+    }
+
+    /// Requires the PostgreSQL fixture in docs/testing-databases.md.
+    #[test]
+    #[ignore = "requires PostgreSQL"]
+    fn isolated_pgpass_connects_and_reconnects_without_a_secret_store() {
+        use std::io::Write as _;
+        let root = tempfile::tempdir().unwrap();
+        let mut file = tempfile::NamedTempFile::new_in(root.path()).unwrap();
+        let login = pg(PasswordSave::Never).user;
+        let secret = Secret::new(std::env::var(password_env()).unwrap_or_else(|_| login.clone()));
+        let port = std::env::var("PYOXIDE_TEST_PG_PORT").map_or(55432, |p| p.parse().unwrap());
+        let host = std::env::var("PYOXIDE_TEST_PG_HOST").unwrap_or_else(|_| "localhost".into());
+        writeln!(
+            file,
+            "{}:{}:{}:{}:{}",
+            host.replace(':', "\\:"),
+            port,
+            login,
+            login,
+            secret.expose().replace('\\', "\\\\").replace(':', "\\:")
+        )
+        .unwrap();
+        file.flush().unwrap();
+        let passfile = file.path().to_str().unwrap().to_owned();
+        let env: EnvLookup = Arc::new(move |var| (var == "PGPASSFILE").then(|| passfile.clone()));
+        let os = Counting::default();
+        let store = ProjectStore::new(Arc::new(os.clone()), env);
+        let mut source = DataSource {
+            name: "file-login".into(),
+            profile: pg(PasswordSave::Never),
+        };
+        source.profile.host = host;
+        source.profile.port = Some(port);
+        store
+            .save(
+                root.path(),
+                SaveRequest {
+                    sources: vec![source.clone()],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let mut updated = source.clone();
+        updated.profile.gui.as_mut().unwrap().auth = db_core::profile::AuthMethod::Pgpass;
+        store
+            .save_prompt(root.path(), &source, &updated, PasswordChange::Keep)
+            .unwrap();
+        assert!(!store.needs_prompt(root.path(), &updated));
+        for _ in 0..2 {
+            let handle = store.connections(root.path());
+            runtime().block_on(async {
+                let conn = handle
+                    .open(&DataSourceId::from(updated.name.as_str()), Purpose::Console)
+                    .await
+                    .unwrap();
+                let db_core::Outcome::Rows(mut rows) = conn
+                    .execute("select current_user::text", &[], &Default::default())
+                    .await
+                    .unwrap()
+                else {
+                    panic!("expected current user")
+                };
+                assert_eq!(
+                    rows.next_page(1).await.unwrap(),
+                    vec![vec![db_core::Value::from(login.as_str())]]
+                );
+                rows.close().await.unwrap();
+                conn.close().await.unwrap();
+            });
+        }
+        let bad = futures_block_on(store.test(
+            root.path(),
+            updated,
+            Some(Secret::new("invalid-explicit-credential")),
+        ));
+        assert!(bad.is_err_and(|e| e.auth));
+        assert_eq!(os.calls(), 0);
+    }
+
+    /// Requires the local PostgreSQL fixture in docs/testing-databases.md.
+    #[test]
+    #[ignore = "requires PostgreSQL"]
+    fn prompted_postgres_connection_uses_entered_user() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let (store, _os) = store();
+        let mut profile = pg(PasswordSave::Never);
+        let user = profile.user.clone();
+        profile.user = "missing_fixture_user".into();
+        profile.host = std::env::var("PYOXIDE_TEST_PG_HOST").unwrap_or_else(|_| "localhost".into());
+        profile.port =
+            Some(std::env::var("PYOXIDE_TEST_PG_PORT").map_or(55432, |port| port.parse().unwrap()));
+        let source = DataSource {
+            name: "prompt-test".into(),
+            profile,
+        };
+        store
+            .save(
+                root,
+                SaveRequest {
+                    sources: vec![source.clone()],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let password = Secret::new(std::env::var(password_env()).unwrap_or_else(|_| user.clone()));
+        store.hold_answer(
+            root,
+            &source,
+            Answer {
+                user: user.clone(),
+                auth: db_core::profile::AuthMethod::UserPassword,
+                password,
+                save: PasswordSave::Never,
+            },
+        );
+        let connections = store.connections(root);
+        runtime().block_on(async {
+            let conn = connections
+                .open(&DataSourceId::from(source.name.as_str()), Purpose::Console)
+                .await
+                .unwrap();
+            let db_core::Outcome::Rows(mut cursor) = conn
+                .execute("SELECT current_user::text", &[], &Default::default())
+                .await
+                .unwrap()
+            else {
+                panic!("expected current user")
+            };
+            let rows = cursor.next_page(1).await.unwrap();
+            assert_eq!(rows, vec![vec![db_core::Value::from(user.as_str())]]);
+            cursor.close().await.unwrap();
+            conn.close().await.unwrap();
+        });
     }
 
     /// The OS store is asked for a data source that saves "Forever" only:

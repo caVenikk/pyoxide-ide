@@ -133,6 +133,19 @@ impl PopupHost {
         self.popups
             .iter()
             .filter_map(|popup| {
+                if popup.context == "CodeList"
+                    && let Ok(list) = popup
+                        .content
+                        .clone()
+                        .downcast::<crate::list_popup::ListPopup>()
+                    && list.read(cx).grouped()
+                {
+                    return Some(
+                        deferred(div().absolute().size_full().child(list))
+                            .with_priority(1)
+                            .into_any_element(),
+                    );
+                }
                 let editor = popup.editor.read(cx);
                 let anchor = popup.anchor.min(editor.buffer().len_chars());
                 let anchor_line = editor.buffer().char_to_line(anchor);

@@ -323,7 +323,6 @@ pub struct Explorer {
     /// Loading models for the SQL files' code intelligence (`model_load`).
     model_load: model_load::State,
     /// The passwords asked for (`connect`).
-    connect: connect::State,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -354,7 +353,6 @@ impl Explorer {
             scroll: UniformListScrollHandle::new(),
             expansion: Default::default(),
             model_load: model_load::State::default(),
-            connect: connect::State::default(),
             _subscriptions: Vec::new(),
         }
     }
@@ -539,14 +537,33 @@ impl Explorer {
         else {
             return;
         };
+        let policy = source.profile.gui_options().password_save;
+        if policy == db_core::PasswordSave::ForSession
+            && let Some(answer) = self
+                .tree
+                .lives
+                .get(&source.name)
+                .and_then(|live| live.credentials.answer())
+        {
+            let mut source = source;
+            answer.apply(&mut source.profile);
+            self.run_test(root, source, answer.password_override(), cx);
+            return;
+        }
         let asks = source.profile.needs_password()
-            && source.profile.gui_options().password_save == db_core::PasswordSave::Never;
+            && source.profile.gui_options().auth == db_core::profile::AuthMethod::UserPassword
+            && matches!(
+                policy,
+                db_core::PasswordSave::Never | db_core::PasswordSave::ForSession
+            );
         if asks {
             let this = cx.entity().downgrade();
-            let (name, user) = (source.name.clone(), source.profile.user.clone());
-            crate::prompt::ask(&name, &user, window, cx, move |secret, cx| {
-                if let (Some(secret), Some(this)) = (secret, this.upgrade()) {
-                    this.update(cx, |this, cx| this.run_test(root, source, Some(secret), cx));
+            crate::prompt::open(&source.clone(), None, window, cx, move |answer, cx| {
+                if let (Some(answer), Some(this)) = (answer, this.upgrade()) {
+                    let mut source = source;
+                    answer.apply(&mut source.profile);
+                    let secret = answer.password_override();
+                    this.update(cx, |this, cx| this.run_test(root, source, secret, cx));
                 }
             });
             return;

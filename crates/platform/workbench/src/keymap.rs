@@ -80,6 +80,7 @@ pub const MACOS: &str = concat!(
     include_str!("../keymaps/macos/settings.toml"),
     include_str!("../keymaps/macos/breakpoints.toml"),
     include_str!("../keymaps/macos/terminal.toml"),
+    include_str!("../keymaps/macos/file-structure.toml"),
 );
 /// The default keymap of Windows and Linux: the files of `keymaps/default/`,
 /// one per area, joined in this order (see the module documentation).
@@ -106,6 +107,7 @@ pub const DEFAULT: &str = concat!(
     include_str!("../keymaps/default/settings.toml"),
     include_str!("../keymaps/default/breakpoints.toml"),
     include_str!("../keymaps/default/terminal.toml"),
+    include_str!("../keymaps/default/file-structure.toml"),
 );
 
 /// The key bindings of a module (ADR 0022): its area files for macOS and

@@ -96,3 +96,18 @@ ui::ui_commands! {
         "Stops a language server; it starts again when a file needs it.",
         r#"{"server": "ruff"}"#;
 }
+
+ui::ui_commands! {
+    STRUCTURE_COMMANDS, scope = "FileStructure";
+    StructureSettings => "structure.settings", "File Structure Settings", "Opens the File Structure presentation options.";
+    SortStructure => "structure.sort-alphabetically", "Sort Alphabetically", "Sorts sibling rows alphabetically or in source order.";
+    NarrowStructure => "structure.narrow-down", "Narrow Down on Typing", "Shows only matching rows during File Structure speed search.";
+    ToggleFirstGroup => "structure.toggle-first", "Toggle First Group",
+        "Toggles the first group of the file structure.";
+    ToggleSecondGroup => "structure.toggle-second", "Toggle Second Group",
+        "Toggles the second group of the file structure.";
+    ToggleThirdGroup => "structure.toggle-third", "Toggle Third Group",
+        "Toggles the third group of the file structure.";
+    ToggleFourthGroup => "structure.toggle-fourth", "Toggle Fourth Group",
+        "Toggles the fourth group of the file structure.";
+}

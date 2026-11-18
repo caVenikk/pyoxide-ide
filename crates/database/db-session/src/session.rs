@@ -779,6 +779,7 @@ impl Actor {
                 return;
             }
         };
+        let complete_result = spec.complete_result;
         let statements = spec.resolve(dialect);
         let mut outcome = JobOutcome::Completed;
         let mut schema_may_change = false;
@@ -797,7 +798,7 @@ impl Actor {
                 },
             );
             schema_may_change |= may_change_schema(st, dialect);
-            match self.run_statement(st, &mut cancel).await {
+            match self.run_statement(st, complete_result, &mut cancel).await {
                 Ok(StatementDone::Affected { rows, timing }) => {
                     self.job_event(job, JobEvent::Affected { index, rows });
                     self.job_event(job, JobEvent::Finished { index, timing });
@@ -856,6 +857,7 @@ impl Actor {
     async fn run_statement(
         &mut self,
         st: &JobStatement,
+        complete_result: bool,
         cancel: &mut watch::Receiver<bool>,
     ) -> Result<StatementDone, Failure> {
         let (conn, dialect) = self.ensure_conn(Some(cancel)).await?;
@@ -914,7 +916,13 @@ impl Actor {
         let page_size = self.shared.options.page_size.max(1);
         let page = guarded(
             &conn,
-            cursor.next_page(page_size),
+            async {
+                let mut rows = cursor.next_page(page_size).await?;
+                while complete_result && !cursor.is_exhausted() {
+                    rows.extend(cursor.next_page(page_size).await?);
+                }
+                Ok(rows)
+            },
             Some(cancel),
             self.grace(),
         )

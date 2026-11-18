@@ -337,7 +337,7 @@ impl CodeIntelView {
         targets: ListTargets,
         cx: &mut Context<Self>,
     ) {
-        if items.is_empty() {
+        if items.is_empty() && options.filters.is_empty() {
             return;
         }
         let Some(window) = self.nav.window else {

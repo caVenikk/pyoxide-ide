@@ -469,8 +469,13 @@ impl ServicesPanel {
                         close.update(cx, |c, cx| c.close_tab(ix, cx));
                     })),
                 )
-                .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
-                    select.update(cx, |c, cx| c.select_pane(Pane::Result(ix), cx));
+                .on_click(cx.listener(move |_, _: &ClickEvent, window, cx| {
+                    select.update(cx, |c, cx| {
+                        c.select_pane(Pane::Result(ix), cx);
+                        if let Some(plan) = c.current_plan() {
+                            plan.update(cx, |p, cx| p.focus_mode(window, cx));
+                        }
+                    });
                 })),
             );
         }

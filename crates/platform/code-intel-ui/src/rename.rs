@@ -102,15 +102,46 @@ impl CodeIntelView {
             let probe = services.rename(&doc, at, shown.clone()).await;
             let _ = this.update(cx, |v, cx| {
                 v.rename.request = None;
+                if v.active_document()
+                    .is_none_or(|current| current.id != doc || current.version() != version)
+                {
+                    return;
+                }
                 match probe {
-                    Ok(_) => {
+                    Ok(edit) => {
+                        let inline = services
+                            .prefers_inline_rename(&doc)
+                            .then(|| {
+                                let document = v.document_of(&editor)?;
+                                let mut occurrences: Vec<_> = edit
+                                    .edits_for(doc.path())
+                                    .filter_map(|e| {
+                                        document.versions.range(version, e.range.clone())
+                                    })
+                                    .collect();
+                                occurrences.sort_by_key(|r| r.start);
+                                let active = occurrences
+                                    .iter()
+                                    .find(|r| r.start <= offset && offset < r.end)?
+                                    .clone();
+                                Some((active, occurrences))
+                            })
+                            .flatten();
                         v.rename.pending = Some(Pending {
                             doc,
                             at,
                             version,
                             name: shown.clone(),
                         });
-                        cx.emit(CodeIntelEvent::RenameDialog { name: shown });
+                        if let Some((active, occurrences)) = inline {
+                            cx.emit(CodeIntelEvent::RenameInline {
+                                name: shown,
+                                active,
+                                occurrences,
+                            });
+                        } else {
+                            cx.emit(CodeIntelEvent::RenameDialog { name: shown });
+                        }
                     }
                     Err(IntelError::Other(message)) => {
                         v.show_hint(&editor, offset, &format!("Cannot rename: {message}"), cx)

@@ -13,7 +13,7 @@ pub fn supports_analyze(dialect: Dialect) -> bool {
 }
 
 /// The statements that show the plan of `stmt`, to run one after another:
-/// `EXPLAIN (FORMAT JSON)` on PostgreSQL, `EXPLAIN QUERY PLAN` on SQLite,
+/// `EXPLAIN (FORMAT TEXT)` on PostgreSQL, `EXPLAIN QUERY PLAN` on SQLite,
 /// `EXPLAIN PLAN FOR` and a read of `DBMS_XPLAN` on Oracle, `EXPLAIN` on
 /// Generic. A closing `;` of `stmt` is dropped. Empty when `stmt` has nothing
 /// in it.
@@ -30,8 +30,8 @@ pub fn explain_statements(stmt: &str, dialect: Dialect, options: ExplainOptions)
     };
     let s = &stmt[first.start..last.end];
     match dialect {
-        Dialect::Postgres if options.analyze => vec![format!("EXPLAIN (ANALYZE, FORMAT JSON) {s}")],
-        Dialect::Postgres => vec![format!("EXPLAIN (FORMAT JSON) {s}")],
+        Dialect::Postgres if options.analyze => vec![format!("EXPLAIN (ANALYZE, FORMAT TEXT) {s}")],
+        Dialect::Postgres => vec![format!("EXPLAIN (FORMAT TEXT) {s}")],
         Dialect::Sqlite => vec![format!("EXPLAIN QUERY PLAN {s}")],
         Dialect::Oracle => vec![
             format!("EXPLAIN PLAN FOR {s}"),

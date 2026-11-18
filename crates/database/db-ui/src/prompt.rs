@@ -16,14 +16,16 @@ use futures::StreamExt as _;
 use futures::channel::{mpsc, oneshot};
 use gpui::{
     App, AppContext as _, Context, Entity, FocusHandle, Focusable, Global, IntoElement, Render,
-    SharedString, WeakEntity, Window, div, prelude::*, px,
+    WeakEntity, Window, div, prelude::*, px,
 };
 use serde_json::{Value as Json, json};
 use themes::UiRole;
 use ui::form::{BarButton, BottomBar, ButtonRole};
 use ui::theme::ThemeExt;
 
-use db_core::{PasswordSave, Secret};
+use db_core::{Backend, PasswordSave, Profile, Secret, profile::AuthMethod};
+use ui::form::MenuPopup;
+use ui::menu::MenuItem;
 
 use crate::password::PasswordField;
 
@@ -33,10 +35,19 @@ ui::ui_commands! {
     PromptSet { value: String } => "db.password-prompt.set", "Set Password",
         "Types `value` into the password prompt of a data source (tests and the control channel; the value is never echoed or logged).",
         r#"{"value": "secret"}"#;
+    /// Edit the user.
+    PromptUser { value: String } => "db.password-prompt.user", "Set Connection User",
+        "Sets the user for this connection.";
+    /// Choose authentication.
+    PromptAuth { value: String } => "db.password-prompt.auth", "Set Connection Authentication",
+        "Selects a supported authentication method.";
     /// Choose how long the password is kept.
     PromptSave { value: String } => "db.password-prompt.save", "Set Save Choice",
-        "Chooses in the password prompt how long the typed password is kept: `never`, `until-restart` or `forever` (tests and the control channel).",
+        "Chooses in the password prompt how long the typed password is kept: `never`, `until-restart` `for-session` or `forever` (tests and the control channel).",
         r#"{"value": "never"}"#;
+    /// Open the credential store configuration.
+    PromptSettings => "db.password-prompt.settings", "IDE Passwords Settings…",
+        "Opens the password storage configuration in an independent editor window.";
     /// Connect with the password.
     PromptOk => "db.password-prompt.ok", "OK",
         "Connects with the password typed into the prompt.";
@@ -45,17 +56,34 @@ ui::ui_commands! {
         "Closes the password prompt without connecting.";
 }
 
-/// Texts (our own).
-const TITLE: &str = "Connect to Data Source";
-const WIDTH: f32 = 420.0;
-const HEIGHT: f32 = 150.0;
-const HEIGHT_WITH_SAVE: f32 = 190.0;
-const LABEL_WIDTH: f32 = 80.0;
+const WIDTH: f32 = 411.0;
+const HEIGHT: f32 = 227.0;
+
+const LABEL_WIDTH: f32 = 102.0;
 
 /// What was typed, and for how long it is kept.
+#[derive(Clone)]
 pub struct Answer {
+    pub user: String,
+    pub auth: AuthMethod,
     pub password: Secret,
     pub save: PasswordSave,
+}
+
+impl Answer {
+    /// pgpass is resolved when opening the physical connection.
+    pub fn password_override(&self) -> Option<Secret> {
+        (self.auth != AuthMethod::Pgpass).then(|| self.password.clone())
+    }
+
+    pub fn apply(&self, profile: &mut Profile) {
+        if self.auth == AuthMethod::None && profile.backend == Backend::OracleOdpi {
+            profile.user.clear();
+        } else {
+            profile.user.clone_from(&self.user);
+        }
+        profile.gui.get_or_insert_with(Default::default).auth = self.auth;
+    }
 }
 
 type Done = Box<dyn FnOnce(Option<Answer>, &mut App)>;
@@ -70,6 +98,7 @@ impl Global for OpenPrompt {}
 pub(crate) struct Request {
     pub root: PathBuf,
     pub source: String,
+    pub session: crate::store::CredentialSession,
     pub reply: oneshot::Sender<bool>,
 }
 
@@ -83,11 +112,17 @@ impl Global for Asker {}
 impl Asker {
     /// Waits until the person has typed the password of `source` (`true`),
     /// or has not (`false`: cancelled, or nobody to ask).
-    pub async fn ask(&self, root: PathBuf, source: String) -> bool {
+    pub async fn ask(
+        &self,
+        root: PathBuf,
+        source: String,
+        session: crate::store::CredentialSession,
+    ) -> bool {
         let (reply, answer) = oneshot::channel();
         let request = Request {
             root,
             source,
+            session,
             reply,
         };
         if self.0.unbounded_send(request).is_err() {
@@ -110,8 +145,9 @@ pub(crate) fn init(cx: &mut App) {
     // that has been typed meanwhile finds it at hand and asks nothing.
     cx.spawn(async move |cx| {
         while let Some(request) = rx.next().await {
-            let answered =
-                cx.update(|cx| crate::explorer::ask_password(&request.root, &request.source, cx));
+            let answered = cx.update(|cx| {
+                crate::explorer::ask_password(&request.root, &request.source, &request.session, cx)
+            });
             let ok = match answered {
                 Ok(Some(answer)) => answer.await.unwrap_or(false),
                 _ => false,
@@ -130,64 +166,27 @@ pub(crate) fn state_json(cx: &App) -> Json {
         .unwrap_or(Json::Null)
 }
 
-/// Asks for the password of the data source `name` (user `user`) over
-/// `window`; `done` gets it, or `None` when the prompt was cancelled. For a
-/// test of a connection, which keeps nothing.
-pub fn ask(
-    name: &str,
-    user: &str,
-    window: &mut Window,
-    cx: &mut App,
-    done: impl FnOnce(Option<Secret>, &mut App) + 'static,
-) {
-    open(name, user, None, window, cx, move |answer, cx| {
-        done(answer.map(|a| a.password), cx)
-    });
-}
-
-/// Asks for the password to connect to the data source `name` (user
-/// `user`) over `window`, with the choice of how long it is kept (`save`
-/// is the one shown first); `done` gets the answer, or `None` when the
-/// prompt was cancelled.
-pub fn ask_to_connect(
-    name: &str,
-    user: &str,
-    save: PasswordSave,
-    window: &mut Window,
-    cx: &mut App,
-    done: impl FnOnce(Option<Answer>, &mut App) + 'static,
-) {
-    open(name, user, Some(save), window, cx, done);
-}
-
-fn open(
-    name: &str,
-    user: &str,
+/// Ask over the project's window; connection tests omit the save policy.
+pub(crate) fn open(
+    source: &crate::DataSource,
     save: Option<PasswordSave>,
     window: &mut Window,
     cx: &mut App,
     done: impl FnOnce(Option<Answer>, &mut App) + 'static,
 ) {
-    let height = if save.is_some() {
-        HEIGHT_WITH_SAVE
-    } else {
-        HEIGHT
-    };
+    let name = &source.name;
     let options = ui::dialog_window::DialogOptions {
-        title: TITLE.into(),
-        size: gpui::size(
-            px(WIDTH),
-            px(height + ui::dialog_window::title_height(true)),
-        ),
+        title: format!("Connecting to '{name}'…").into(),
+        size: gpui::size(px(WIDTH), px(HEIGHT)),
         activate: !workbench::env::background(),
         themed_title: true,
         ..ui::dialog_window::DialogOptions::default()
     };
     let done: Rc<RefCell<Option<Done>>> = Rc::new(RefCell::new(Some(Box::new(done))));
-    let (name, user) = (name.to_owned(), user.to_owned());
+
     let mut built = None;
     ui::dialog_window::open(window, options, cx, |window, cx| {
-        let prompt = cx.new(|cx| Prompt::new(name, user, save, done, window, cx));
+        let prompt = cx.new(|cx| Prompt::new(source, save, done, window, cx));
         built = Some(prompt.clone());
         prompt
     });
@@ -198,7 +197,11 @@ fn open(
 
 struct Prompt {
     name: String,
-    user: String,
+    backend: Backend,
+    user: Entity<editor::Editor>,
+    auth: AuthMethod,
+    popup: Option<MenuPopup>,
+    settings_error: Option<String>,
     field: Entity<PasswordField>,
     /// How long the password is kept, when the prompt offers the choice.
     save: Option<PasswordSave>,
@@ -214,18 +217,31 @@ impl Focusable for Prompt {
 
 impl Prompt {
     fn new(
-        name: String,
-        user: String,
+        source: &crate::DataSource,
         save: Option<PasswordSave>,
         done: Rc<RefCell<Option<Done>>>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let field = cx.new(|cx| PasswordField::new("password-prompt-field", cx));
-        window.focus(&field.focus_handle(cx));
+        let user = &source.profile.user;
+        let editor = editor::field::new(user, None, true, window, cx);
+        editor.update(cx, |e, cx| e.set_text_selected(user, cx));
+        window.focus(&editor.focus_handle(cx));
+        let on_close = done.clone();
+        cx.on_release(move |_, cx| {
+            if let Some(done) = on_close.borrow_mut().take() {
+                cx.defer(move |cx| done(None, cx));
+            }
+        })
+        .detach();
         Self {
-            name,
-            user,
+            name: source.name.clone(),
+            backend: source.profile.backend,
+            user: editor,
+            auth: source.profile.gui_options().auth,
+            popup: None,
+            settings_error: None,
             field,
             save,
             done,
@@ -234,8 +250,22 @@ impl Prompt {
     }
 
     fn finish(&mut self, ok: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let user = self.user.read(cx).text();
+        if ok
+            && user.is_empty()
+            && (self.auth == AuthMethod::UserPassword || self.backend == Backend::Postgres)
+        {
+            window.focus(&self.user.focus_handle(cx));
+            return;
+        }
         let answer = ok.then(|| Answer {
-            password: self.field.read(cx).secret().unwrap_or_default(),
+            user,
+            auth: self.auth,
+            password: if self.auth == AuthMethod::UserPassword {
+                self.field.read(cx).secret().unwrap_or_default()
+            } else {
+                Secret::default()
+            },
             save: self.save.unwrap_or_default(),
         });
         let done = self.done.borrow_mut().take();
@@ -250,37 +280,133 @@ impl Prompt {
     fn state_json(&self, cx: &App) -> Json {
         json!({
             "name": self.name,
-            "user": self.user,
+            "user": self.user.read(cx).text(),
+            "auth": self.auth.id(),
             "save": self.save.map(PasswordSave::id),
             "field": self.field.read(cx).state_json(),
         })
     }
 
-    /// "Never / Until restart / Forever".
-    fn save_choice(&self, save: PasswordSave, cx: &mut Context<Self>) -> gpui::AnyElement {
-        let choices: Vec<SharedString> = PasswordSave::ALL
-            .iter()
-            .map(|s| SharedString::from(save_title(*s)))
-            .collect();
-        let selected = PasswordSave::ALL.iter().position(|s| *s == save);
-        let this = cx.entity().downgrade();
-        div()
-            .flex()
-            .flex_row()
-            .child(ui::form::segmented(
+    fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((path, initial)) = crate::store(cx).password_settings_file() else {
+            return;
+        };
+        let mut owner = window.window_handle();
+        while let Some(parent) = ui::dialog_window::parent_of(owner, cx) {
+            owner = parent;
+        }
+        let Some(owner) = owner.downcast::<workbench::Workbench>() else {
+            return;
+        };
+        let file = cx.background_spawn(async move {
+            use std::io::{ErrorKind, Write as _};
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&path)
+            {
+                Ok(mut file) => file.write_all(initial.as_bytes())?,
+                Err(e) if e.kind() == ErrorKind::AlreadyExists => {}
+                Err(e) => return Err(e),
+            }
+            Ok::<_, std::io::Error>(path)
+        });
+        cx.spawn(async move |this, cx| match file.await {
+            Ok(path) => {
+                let _ = owner.update(cx, |workbench, _, cx| workbench.open_file_window(path, cx));
+            }
+            Err(err) => {
+                let _ = this.update(cx, |prompt, cx| {
+                    prompt.settings_error = Some(format!("Cannot open password settings: {err}"));
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+    }
+
+    fn combo(&self, auth: bool, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let (id, label) = if auth {
+            ("password-prompt-auth", self.auth.label())
+        } else {
+            (
                 "password-prompt-save",
-                &choices,
-                selected,
-                move |ix, _, cx| {
-                    if let (Some(save), Some(this)) = (PasswordSave::ALL.get(ix), this.upgrade()) {
-                        this.update(cx, |this, cx| {
-                            this.save = Some(*save);
-                            cx.notify();
-                        });
-                    }
-                },
-                cx,
-            ))
+                save_title(self.save.unwrap_or_default()),
+            )
+        };
+        let bounds = Rc::new(RefCell::new(gpui::Bounds::default()));
+        let anchor = bounds.clone();
+        ui::form::combo(id, vec![div().child(label).into_any_element()], cx)
+            .debug_selector(move || id.to_owned())
+            .child(
+                gpui::canvas(move |b, _, _| *anchor.borrow_mut() = b, |_, _, _, _| {})
+                    .absolute()
+                    .size_full(),
+            )
+            .on_click(cx.listener(move |this, _, window, cx| {
+                if let Some(p) = this.popup.take() {
+                    p.close(cx);
+                }
+                let mut items: Vec<MenuItem> = if auth {
+                    AuthMethod::choices(this.backend)
+                        .iter()
+                        .map(|method| {
+                            MenuItem::action(
+                                method.label(),
+                                PromptAuth {
+                                    value: method.id().into(),
+                                },
+                            )
+                        })
+                        .collect()
+                } else {
+                    PasswordSave::ALL
+                        .into_iter()
+                        .map(|s| {
+                            MenuItem::action(
+                                save_title(s),
+                                PromptSave {
+                                    value: s.id().into(),
+                                },
+                            )
+                        })
+                        .collect()
+                };
+                if !auth && crate::store(cx).password_settings_file().is_some() {
+                    items.push(MenuItem::separator());
+                    items.push(MenuItem::action("IDE Passwords Settings…", PromptSettings));
+                }
+                let b = *bounds.borrow();
+                let selected = if auth {
+                    AuthMethod::choices(this.backend)
+                        .iter()
+                        .position(|method| *method == this.auth)
+                } else {
+                    PasswordSave::ALL
+                        .iter()
+                        .position(|save| Some(*save) == this.save)
+                };
+                this.popup = MenuPopup::open_with(
+                    items,
+                    ui::menu::PopupOptions {
+                        selected,
+                        ..Default::default()
+                    },
+                    gpui::point(b.left(), b.bottom()),
+                    &this.focus,
+                    !workbench::env::background(),
+                    window,
+                    cx,
+                    |this, cx| {
+                        if let Some(p) = this.popup.take() {
+                            p.close(cx);
+                        }
+                    },
+                );
+            }))
             .into_any_element()
     }
 }
@@ -289,6 +415,7 @@ impl Prompt {
 /// list does).
 fn save_title(save: PasswordSave) -> &'static str {
     match save {
+        PasswordSave::ForSession => "For session",
         PasswordSave::Never => "Never",
         PasswordSave::UntilRestart => "Until restart",
         PasswordSave::Forever => "Forever",
@@ -297,7 +424,9 @@ fn save_title(save: PasswordSave) -> &'static str {
 
 impl Render for Prompt {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let save_row = self.save.map(|save| (save, self.save_choice(save, cx)));
+        let auth = self.combo(true, cx);
+        let save = self.save.map(|_| self.combo(false, cx));
+        let uses_password = self.auth == AuthMethod::UserPassword;
         let theme = cx.theme();
         let row = |label: &'static str, value: gpui::AnyElement| {
             div()
@@ -308,6 +437,7 @@ impl Render for Prompt {
                 .child(div().flex_1().child(value))
         };
         let bar = BottomBar::new()
+            .separator(false)
             .button(BarButton::new(
                 "password-prompt-ok",
                 "OK",
@@ -325,9 +455,26 @@ impl Render for Prompt {
             .id("password-prompt")
             .key_context("DataSourcePasswordPrompt")
             .track_focus(&self.focus)
+            .on_action(cx.listener(|this, a: &PromptUser, _, cx| {
+                this.user
+                    .update(cx, |e, cx| e.set_text_selected(&a.value, cx))
+            }))
+            .on_action(cx.listener(|this, a: &PromptAuth, _, cx| {
+                let Some(method) = AuthMethod::choices(this.backend)
+                    .iter()
+                    .find(|method| method.id() == a.value)
+                else {
+                    return;
+                };
+                this.auth = *method;
+                cx.notify();
+            }))
             .on_action(cx.listener(|this, a: &PromptSet, _, cx| {
                 this.field.update(cx, |f, cx| f.set(&a.value, cx));
             }))
+            .on_action(
+                cx.listener(|this, _: &PromptSettings, window, cx| this.open_settings(window, cx)),
+            )
             .on_action(cx.listener(|this, a: &PromptSave, _, cx| {
                 if let (Some(save), Some(_)) = (PasswordSave::from_id(&a.value), this.save) {
                     this.save = Some(save);
@@ -338,12 +485,31 @@ impl Render for Prompt {
             .on_action(
                 cx.listener(|this, _: &PromptCancel, window, cx| this.finish(false, window, cx)),
             )
+            .capture_action(
+                cx.listener(|this, _: &editor::commands::Newline, window, cx| {
+                    this.finish(true, window, cx);
+                    cx.stop_propagation();
+                }),
+            )
+            .capture_action(
+                cx.listener(|this, _: &editor::commands::Escape, window, cx| {
+                    this.finish(false, window, cx);
+                    cx.stop_propagation();
+                }),
+            )
             .on_key_down(cx.listener(|this, e: &gpui::KeyDownEvent, window, cx| {
+                let m = e.keystroke.modifiers;
+                if m.control || m.platform || m.alt || m.function {
+                    return;
+                }
                 match e.keystroke.key.as_str() {
                     "enter" => this.finish(true, window, cx),
                     "escape" => this.finish(false, window, cx),
-                    _ => {}
+                    "tab" if m.shift => window.focus_prev(),
+                    "tab" => window.focus_next(),
+                    _ => return,
                 }
+                cx.stop_propagation();
             }))
             .size_full()
             .flex()
@@ -352,7 +518,11 @@ impl Render for Prompt {
             .text_color(theme.color(UiRole::Text))
             .text_size(theme.ui_size())
             .font_family(theme.ui_family())
-            .children(ui::dialog_window::title_bar(TITLE, true, cx))
+            .children(ui::dialog_window::title_bar(
+                format!("Connecting to '{}'…", self.name),
+                true,
+                cx,
+            ))
             .child(
                 div()
                     .flex_1()
@@ -363,15 +533,46 @@ impl Render for Prompt {
                     .pt(px(12.0))
                     .child(
                         div()
-                            .text_color(theme.color(UiRole::TextMuted))
-                            .child(format!("Data source \u{201c}{}\u{201d}", self.name)),
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .child(
+                                ui::icons::Icon::new(ui::icons::IconName::WARNING).size(px(16.0)),
+                            )
+                            .child(
+                                self.settings_error.clone().unwrap_or_else(|| {
+                                    "Please provide database credentials.".into()
+                                }),
+                            ),
                     )
+                    .child(row("Authentication:", auth))
                     .child(row(
                         "User:",
-                        div().child(self.user.clone()).into_any_element(),
+                        div()
+                            .w(px(118.0))
+                            .child(editor::field::frame(&self.user, true, false, window, cx))
+                            .into_any_element(),
                     ))
-                    .child(row("Password:", self.field.clone().into_any_element()))
-                    .children(save_row.map(|(_, choice)| row("Save:", choice))),
+                    .when(uses_password, |d| {
+                        d.child(row(
+                            "Password:",
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(10.0))
+                                .child(div().w(px(118.0)).child(self.field.clone()))
+                                .children(save.map(|choice| {
+                                    div()
+                                        .flex_1()
+                                        .flex()
+                                        .items_center()
+                                        .gap(px(6.0))
+                                        .child("Save:")
+                                        .child(div().flex_1().child(choice))
+                                }))
+                                .into_any_element(),
+                        ))
+                    }),
             )
             .child(bar)
             .child(ui::pointer::frame())

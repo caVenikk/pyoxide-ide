@@ -1,6 +1,6 @@
-//! Explain Plan and Explain Analyze of a console over a scripted
+//! Explain Plan and Explain Analyse of a console over a scripted
 //! PostgreSQL server: the statement at the caret goes to the server wrapped
-//! in `EXPLAIN (FORMAT JSON)`, the answer shows as a Query Plan tab with a
+//! in `EXPLAIN (FORMAT TEXT)`, the answer shows as a Query Plan tab with a
 //! tree and the raw text; the analyzed statement runs only where that is
 //! allowed.
 
@@ -15,29 +15,76 @@ use super::console::{
 use super::grid::NAME;
 use super::*;
 
-const PLAN: &str = r#"[{"Plan": {"Node Type": "Hash Join", "Startup Cost": 6.70, "Total Cost": 43.26, "Plan Rows": 300, "Join Type": "Inner",
-  "Plans": [
-    {"Node Type": "Seq Scan", "Relation Name": "customers", "Startup Cost": 0.00, "Total Cost": 35.75, "Plan Rows": 300},
-    {"Node Type": "Hash", "Startup Cost": 5.20, "Total Cost": 5.20, "Plan Rows": 120}
-  ]}}]"#;
-
-const ANALYZED: &str = r#"[{"Plan": {"Node Type": "Seq Scan", "Relation Name": "customers", "Startup Cost": 0.00, "Total Cost": 35.75, "Plan Rows": 300,
-  "Actual Startup Time": 0.045, "Actual Total Time": 0.504, "Actual Rows": 300.00},
-  "Planning Time": 0.827, "Execution Time": 1.025}]"#;
+const PLAN: &[&str] = &[
+    "Hash Join  (cost=6.70..43.26 rows=300 width=22)",
+    "  Hash Cond: (o.customer_id = c.id)",
+    "  ->  Seq Scan on customers  (cost=0.00..35.75 rows=300 width=10)",
+    "  ->  Hash  (cost=5.20..5.20 rows=120 width=20)",
+];
+const ANALYZED: &[&str] = &[
+    "Seq Scan on customers  (cost=0.00..35.75 rows=300 width=10) (actual time=0.045..0.504 rows=300.00 loops=1)",
+    "Planning Time: 0.827 ms",
+    "Execution Time: 1.025 ms",
+];
 
 fn server() -> FakeSource {
     let source = FakeSource::new(Backend::Postgres);
+    source.on("explain (analyze", Reaction::column("QUERY PLAN", ANALYZED));
     source.on(
-        "explain (analyze",
-        Reaction::column("QUERY PLAN", &[ANALYZED]),
-    );
-    source.on(
-        "explain (format json)",
-        Reaction::column("QUERY PLAN", &[PLAN]),
+        "explain (format text)",
+        Reaction::column("QUERY PLAN", PLAN),
     );
     source.on("from demo.customers", Reaction::column("id", &["1"]));
     source.on("delete from", Reaction::Affected(1));
     source
+}
+
+#[gpui::test]
+fn toolbar_explain_split_opens_its_menu_or_runs_the_plain_plan(cx: &mut TestAppContext) {
+    use gpui::{Modifiers, MouseButton, VisualTestContext};
+
+    let (_dir, root) = project();
+    let source = server();
+    let (mut h, _cache, _consoles) = harness(cx, &root, &source);
+    open_console(&mut h);
+    h.invoke(
+        "editor.type",
+        json!({"text": "select * from demo.customers;"}),
+    );
+    for selector in ["sql-explain-menu", "sql-explain"] {
+        let mut view = VisualTestContext::from_window(h.window.into(), h.cx);
+        let center = view
+            .debug_bounds(selector)
+            .expect("split button part")
+            .center();
+        view.simulate_mouse_down(center, MouseButton::Left, Modifiers::none());
+        view.simulate_mouse_up(center, MouseButton::Left, Modifiers::none());
+        h.draw();
+        if selector == "sql-explain-menu" {
+            let state = h.invoke("sql.state", Value::Null);
+            assert_eq!(state["popup"]["levels"][0]["selected"], 0);
+            let items = &state["popup"]["levels"][0]["items"];
+            assert_eq!(items[0]["label"], "Explain Plan");
+            assert_eq!(items[1]["label"], "Explain Analyse");
+            assert!(
+                source
+                    .statements(Purpose::Console)
+                    .iter()
+                    .all(|q| !q.starts_with("EXPLAIN"))
+            );
+            h.press("escape");
+            assert!(h.invoke("sql.state", Value::Null)["popup"].is_null());
+        }
+    }
+    assert_eq!(plan(&mut h)["analyze"], false);
+    assert_eq!(
+        source
+            .statements(Purpose::Console)
+            .iter()
+            .filter(|q| q.starts_with("EXPLAIN"))
+            .count(),
+        1
+    );
 }
 
 /// The plan of the first tab, once the console is idle with one.
@@ -109,7 +156,7 @@ fn explain_plan_shows_the_tree_of_the_statement_without_running_it(cx: &mut Test
     let sent = server.statements(Purpose::Console);
     assert!(
         sent.iter()
-            .any(|q| q == "EXPLAIN (FORMAT JSON) select * from demo.customers where id = 1"),
+            .any(|q| q == "EXPLAIN (FORMAT TEXT) select * from demo.customers where id = 1"),
         "{sent:?}"
     );
     assert!(
@@ -117,7 +164,7 @@ fn explain_plan_shows_the_tree_of_the_statement_without_running_it(cx: &mut Test
         "the statement did not run: {sent:?}"
     );
     let log = output(&s);
-    assert!(log.contains("> EXPLAIN (FORMAT JSON) select"), "{log}");
+    assert!(log.contains("> EXPLAIN (FORMAT TEXT) select"), "{log}");
 }
 
 #[gpui::test]
@@ -142,7 +189,7 @@ fn the_properties_of_the_selected_node_and_the_raw_text_are_in_the_tab(cx: &mut 
     assert!(
         plan["details"]
             .to_string()
-            .contains(r#"["Join Type","Inner"]"#),
+            .contains(r#"["Hash Cond","(o.customer_id = c.id)"]"#),
         "{plan}"
     );
 
@@ -161,13 +208,46 @@ fn the_properties_of_the_selected_node_and_the_raw_text_are_in_the_tab(cx: &mut 
     h.invoke("db.plan.view", json!({"mode": "text"}));
     let plan = console_state(&mut h)["tabs"][0]["plan"].clone();
     assert_eq!(plan["mode"], "text");
+    assert_eq!(plan["raw"], PLAN.join("\n"));
+    let s = wait_console(&mut h, "raw grid rows", |s| {
+        s["tabs"][0]["plan"]["raw_grid"]["rows"] == PLAN.len()
+    });
+    let plan = &s["tabs"][0]["plan"];
+    assert_eq!(plan["raw_grid"]["rows"], PLAN.len());
+    assert_eq!(plan["raw_grid"]["columns"][0]["name"], "QUERY PLAN");
+    let longest = PLAN.iter().map(|line| line.chars().count()).max().unwrap();
+    assert!(longest > 50);
+    assert_eq!(plan["raw_grid"]["columns"][0]["auto_width_chars"], longest);
+    assert_eq!(plan["raw_grid"]["cells"][1][0], PLAN[1]);
+    h.press("down");
+    h.press("down");
+    assert_eq!(
+        console_state(&mut h)["tabs"][0]["plan"]["raw_grid"]["selection"]["lead"][0],
+        1
+    );
+    h.press("tab");
+    assert_eq!(console_state(&mut h)["tabs"][0]["plan"]["mode"], "tree");
+    h.press("left");
+    assert_eq!(
+        console_state(&mut h)["tabs"][0]["plan"]["rows"][1]["collapsed"],
+        true
+    );
+    h.press("right");
+    assert_eq!(
+        console_state(&mut h)["tabs"][0]["plan"]["rows"][1]["collapsed"],
+        false
+    );
+    h.press("tab");
+    h.press("escape");
+    h.press("x");
     assert!(
-        plan["raw"]
+        h.invoke("editor.text", Value::Null)
             .as_str()
             .unwrap()
-            .contains("\"Node Type\": \"Hash Join\""),
-        "{plan}"
+            .ends_with('x')
     );
+    h.invoke("db.console.close-result", json!({"index":0}));
+    assert_eq!(console_state(&mut h)["pane"], "output");
 }
 
 #[gpui::test]
@@ -205,13 +285,24 @@ fn explain_analyze_runs_a_select_and_shows_the_measured_values(cx: &mut TestAppC
     assert!(
         plan["details"]
             .to_string()
-            .contains(r#"["Execution Time","1.025"]"#),
+            .contains(r#"["Execution Time","1.025 ms"]"#),
         "{plan}"
+    );
+    for mode in ["text", "tree", "text"] {
+        h.invoke("db.plan.view", json!({"mode": mode}));
+    }
+    assert_eq!(
+        server
+            .statements(Purpose::Console)
+            .iter()
+            .filter(|q| q.starts_with("EXPLAIN"))
+            .count(),
+        1
     );
     let sent = server.statements(Purpose::Console);
     assert!(
         sent.iter()
-            .any(|q| q.starts_with("EXPLAIN (ANALYZE, FORMAT JSON) select")),
+            .any(|q| q.starts_with("EXPLAIN (ANALYZE, FORMAT TEXT) select")),
         "{sent:?}"
     );
 
@@ -355,6 +446,10 @@ fn the_explain_row_of_the_editor_menu_explains_the_statement_at_the_caret(cx: &m
         h.invoke("menu.down", Value::Null);
     }
     h.invoke("menu.open-submenu", Value::Null);
+    let state = h.state();
+    let submenu = &state["editor_menu"]["menu"]["levels"][1]["items"];
+    assert_eq!(submenu[0]["label"], "Explain Plan");
+    assert_eq!(submenu[1]["label"], "Explain Analyse");
     h.invoke("menu.confirm", Value::Null);
     let plan = plan(&mut h);
     assert!(!rows(&plan).is_empty(), "{plan}");
@@ -506,7 +601,7 @@ fn plain_explain_reviews_parameters_without_warning_and_cancel_leaves_no_plan(
     let bound = server.bound();
     assert_eq!(
         bound[0].0,
-        "EXPLAIN (FORMAT JSON) select * from demo.customers where id = $1"
+        "EXPLAIN (FORMAT TEXT) select * from demo.customers where id = $1"
     );
     assert_eq!(bound[0].1, vec![db_core::Value::Int(9)]);
     h.invoke("db.console.explain", Value::Null);

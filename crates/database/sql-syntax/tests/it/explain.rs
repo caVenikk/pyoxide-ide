@@ -9,7 +9,7 @@ fn per_dialect() {
     let e = |s: &str, d| explain_statements(s, d, plain());
     assert_eq!(
         e("select 1;", Dialect::Postgres),
-        ["EXPLAIN (FORMAT JSON) select 1"]
+        ["EXPLAIN (FORMAT TEXT) select 1"]
     );
     assert_eq!(
         e(" select 1 ", Dialect::Sqlite),
@@ -30,7 +30,7 @@ fn analyze_only_where_the_engine_has_it() {
     let opts = ExplainOptions { analyze: true };
     assert_eq!(
         explain_statements("select 1", Dialect::Postgres, opts),
-        ["EXPLAIN (ANALYZE, FORMAT JSON) select 1"]
+        ["EXPLAIN (ANALYZE, FORMAT TEXT) select 1"]
     );
     assert!(
         supports_analyze(Dialect::Postgres)
@@ -48,11 +48,11 @@ fn trailing_semicolons_and_comments_are_dropped_with_care() {
     let e = |s: &str| explain_statements(s, Dialect::Postgres, plain());
     assert_eq!(
         e("-- c\nselect ';' ;; "),
-        ["EXPLAIN (FORMAT JSON) select ';'"]
+        ["EXPLAIN (FORMAT TEXT) select ';'"]
     );
     assert_eq!(
         e("select 1 -- tail ;\n;"),
-        ["EXPLAIN (FORMAT JSON) select 1"]
+        ["EXPLAIN (FORMAT TEXT) select 1"]
     );
     assert!(e("  ; ").is_empty() && e("").is_empty() && e("-- only").is_empty());
 }

@@ -1,10 +1,11 @@
 //! The Query Plan tab of the Services tool window: the plan as a table with
 //! a tree in its first column and, at its right, the properties of the
-//! selected node (DB72, DB73); a toolbar at the left switches to the raw
-//! text.
+//! selected node (DB72, DB73); the tabs below switch between the tree and
+//! the raw plan.
 
 use std::collections::HashSet;
 
+use crate::grid::TableGrid;
 use console::ContentKind;
 use console_ui::ConsoleView;
 use gpui::{
@@ -13,8 +14,9 @@ use gpui::{
 };
 use serde_json::{Value as Json, json};
 use themes::UiRole;
-use ui::components::{Tooltip, icon_button, tree_arrow};
+use ui::components::tree_arrow;
 use ui::icons::Icon;
+use ui::pointer::PointerExt as _;
 use ui::theme::ThemeExt;
 
 use super::{Col, NodeKind, Plan, number};
@@ -24,7 +26,6 @@ const ROW: f32 = 26.0;
 const INDENT: f32 = 16.0;
 const DETAILS_WIDTH: f32 = 300.0;
 const PROPERTY_WIDTH: f32 = 130.0;
-const TOOLBAR_WIDTH: f32 = 32.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Mode {
@@ -32,12 +33,22 @@ pub(crate) enum Mode {
     Text,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Direction {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
 pub(crate) struct PlanView {
     pub plan: Plan,
     collapsed: HashSet<Vec<usize>>,
+    tree_scroll: gpui::ScrollHandle,
     selected: Vec<usize>,
     mode: Mode,
-    raw: Entity<ConsoleView>,
+    raw: Option<Entity<ConsoleView>>,
+    grid: Option<Entity<TableGrid>>,
     focus: FocusHandle,
 }
 
@@ -48,24 +59,34 @@ impl Focusable for PlanView {
 }
 
 impl PlanView {
-    pub fn new(plan: Plan, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let raw = cx.new(|cx| {
-            let mut view = ConsoleView::new(window, cx);
-            view.set_key_context("DatabaseOutput");
-            view
-        });
-        raw.update(cx, |view, cx| {
-            view.model()
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .push_str(ContentKind::Normal, &format!("{}\n", plan.raw));
-            view.flush(cx);
-            // The answer is read from its first line.
-            view.editor().update(cx, |e, cx| e.go_to(0, None, cx));
+    pub fn new(
+        plan: Plan,
+        grid: Option<Entity<TableGrid>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let raw = grid.is_none().then(|| {
+            let raw = cx.new(|cx| {
+                let mut view = ConsoleView::new(window, cx);
+                view.set_key_context("DatabaseOutput");
+                view
+            });
+            raw.update(cx, |view, cx| {
+                view.model()
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .push_str(ContentKind::Normal, &format!("{}\n", plan.raw));
+                view.flush(cx);
+                // The answer is read from its first line.
+                view.editor().update(cx, |e, cx| e.go_to(0, None, cx));
+            });
+            raw
         });
         Self {
+            grid,
             plan,
             collapsed: HashSet::new(),
+            tree_scroll: gpui::ScrollHandle::new(),
             selected: Vec::new(),
             mode: Mode::Tree,
             raw,
@@ -73,8 +94,80 @@ impl PlanView {
         }
     }
 
+    pub(super) fn other_mode(&self) -> Mode {
+        match self.mode {
+            Mode::Tree => Mode::Text,
+            Mode::Text => Mode::Tree,
+        }
+    }
+
     pub fn set_mode(&mut self, mode: Mode, cx: &mut Context<Self>) {
         self.mode = mode;
+        cx.notify();
+    }
+
+    pub(crate) fn focus_mode(&self, window: &mut Window, cx: &mut Context<Self>) {
+        match (&self.grid, &self.raw, self.mode) {
+            (Some(grid), _, Mode::Text) => {
+                crate::grid::touch(window.window_handle(), grid, cx);
+                window.focus(&grid.read(cx).focus_handle(cx));
+            }
+            (_, Some(raw), Mode::Text) => window.focus(&raw.read(cx).focus_handle(cx)),
+            _ => window.focus(&self.focus),
+        }
+    }
+
+    pub(super) fn navigate(&mut self, direction: Direction, cx: &mut Context<Self>) {
+        if self.mode != Mode::Tree {
+            return;
+        }
+        let path = self.selected.clone();
+        match direction {
+            Direction::Up | Direction::Down => {
+                let lines = self.plan.lines(&self.collapsed);
+                let Some(ix) = lines.iter().position(|line| line.path == path) else {
+                    return;
+                };
+                let next = if direction == Direction::Up {
+                    ix.saturating_sub(1)
+                } else {
+                    (ix + 1).min(lines.len() - 1)
+                };
+                self.selected = lines[next].path.clone();
+            }
+            Direction::Right if self.collapsed.contains(&path) => {
+                self.collapsed.remove(&path);
+            }
+            Direction::Right => {
+                if self
+                    .plan
+                    .node(&path)
+                    .is_some_and(|n| !n.children.is_empty())
+                {
+                    self.selected.push(0);
+                }
+            }
+            Direction::Left
+                if self
+                    .plan
+                    .node(&path)
+                    .is_some_and(|n| !n.children.is_empty())
+                    && !self.collapsed.contains(&path) =>
+            {
+                self.collapsed.insert(path);
+            }
+            Direction::Left => {
+                self.selected.pop();
+            }
+        }
+        if let Some(ix) = self
+            .plan
+            .lines(&self.collapsed)
+            .iter()
+            .position(|line| line.path == self.selected)
+        {
+            self.tree_scroll.scroll_to_item(ix + 1);
+        }
         cx.notify();
     }
 
@@ -126,7 +219,8 @@ impl PlanView {
             "details": self.plan.node(&self.selected).map(|n| {
                 n.props.iter().map(|(k, v)| json!([k, v])).collect::<Vec<_>>()
             }),
-            "raw": self.raw.read(cx).text(cx),
+            "raw": self.plan.raw,
+            "raw_grid": self.grid.as_ref().map(|g| g.read(cx).state_json(cx)),
         })
     }
 
@@ -158,36 +252,28 @@ impl PlanView {
     }
 
     fn render_toolbar(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
-        let button = |id: &'static str, icon, tip: &'static str, on: bool, mode: Mode| {
-            let cx_ref: &App = cx;
-            icon_button(id, icon, px(24.0), px(16.0), on, cx_ref)
+        let button = |id: &'static str, label: &'static str, mode: Mode| {
+            ui::components::header_tab(id, self.mode == mode, true, cx)
                 .debug_selector(move || id.to_owned())
-                .tooltip(Tooltip::text(tip, None))
-                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.set_mode(mode, cx)))
+                .h(px(21.))
+                .px(px(8.))
+                .pointing_hand()
+                .child(label)
+                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                    this.set_mode(mode, cx);
+                    this.focus_mode(window, cx);
+                }))
         };
         div()
-            .id("plan-toolbar")
             .flex()
-            .flex_col()
-            .flex_none()
+            .flex_row()
             .items_center()
-            .w(px(TOOLBAR_WIDTH))
-            .pt(px(2.0))
-            .gap(px(2.0))
-            .child(button(
-                "plan-show-tree",
-                icons::PLAN,
-                "Query Plan",
-                self.mode == Mode::Tree,
-                Mode::Tree,
-            ))
-            .child(button(
-                "plan-show-text",
-                icons::PLAN_TEXT,
-                "Raw Text",
-                self.mode == Mode::Text,
-                Mode::Text,
-            ))
+            .gap(px(4.))
+            .px(px(8.))
+            .h(px(28.))
+            .flex_none()
+            .child(button("plan-show-tree", "Operations Tree", Mode::Tree))
+            .child(button("plan-show-text", "Raw", Mode::Text))
             .into_any_element()
     }
 
@@ -267,7 +353,8 @@ impl PlanView {
                     let slot = if has_children {
                         slot.child(tree_arrow(!collapsed, cx)).on_mouse_down(
                             gpui::MouseButton::Left,
-                            cx.listener(move |this, _, _, cx| {
+                            cx.listener(move |this, _, window, cx| {
+                                window.focus(&this.focus);
                                 cx.stop_propagation();
                                 this.toggle(arrow_path.clone(), cx);
                             }),
@@ -292,14 +379,9 @@ impl PlanView {
             .min_w(px(0.0))
             .h_full()
             .overflow_scroll()
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .min_w(px(total))
-                    .child(header)
-                    .children(rows),
-            )
+            .track_scroll(&self.tree_scroll)
+            .child(header)
+            .children(rows)
             .into_any_element()
     }
 
@@ -375,16 +457,25 @@ impl Render for PlanView {
                 .child(self.render_table(focused, cx))
                 .child(self.render_details(cx))
                 .into_any_element(),
-            Mode::Text => div().size_full().child(self.raw.clone()).into_any_element(),
+            Mode::Text => div()
+                .size_full()
+                .children(self.grid.clone())
+                .children(self.raw.clone())
+                .into_any_element(),
         };
         div()
             .id("plan-view")
             .debug_selector(|| "plan-view".to_owned())
             .track_focus(&self.focus)
+            .key_context(if self.mode == Mode::Tree {
+                "DatabasePlanTree"
+            } else {
+                "DatabasePlanRaw"
+            })
             .flex()
-            .flex_row()
+            .flex_col()
             .size_full()
+            .child(div().flex_1().min_h(px(0.0)).child(body))
             .child(toolbar)
-            .child(div().flex_1().min_w(px(0.0)).h_full().child(body))
     }
 }

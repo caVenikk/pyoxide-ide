@@ -116,7 +116,7 @@ where
     track_held_drag_in(owner, drag, moved, ended, cursor, None)
 }
 
-pub(crate) fn track_held_drag_in<T, S>(
+pub fn track_held_drag_in<T, S>(
     owner: Entity<T>,
     drag: impl Fn(&mut T) -> &mut HeldDrag<S> + 'static,
     moved: impl Fn(&mut T, Point<Pixels>, &mut Context<T>) + 'static,
@@ -150,7 +150,7 @@ where
         |_, _, _| (),
         move |_, _, window, cx| {
             if let Some(cursor) = cursor {
-                ui::pointer::request_window(cursor, window);
+                crate::pointer::request_window(cursor, window);
             }
             let active = window.is_window_active();
             if owner.update(cx, |this, _| drag(this).window_activation(active)) {
@@ -174,7 +174,7 @@ where
             window.on_mouse_event(move |e: &MouseMoveEvent, phase, window, cx| {
                 if phase == DispatchPhase::Capture {
                     let position = origin.map_or(e.position, |origin| {
-                        ui::popup_window::screen_origin(window) + e.position - origin
+                        crate::popup_window::screen_origin(window) + e.position - origin
                     });
                     on_move(Input::Move(position, e.pressed_button), cx);
                 }
@@ -182,7 +182,7 @@ where
             window.on_mouse_event(move |e: &MouseUpEvent, phase, window, cx| {
                 if phase == DispatchPhase::Capture {
                     let position = origin.map_or(e.position, |origin| {
-                        ui::popup_window::screen_origin(window) + e.position - origin
+                        crate::popup_window::screen_origin(window) + e.position - origin
                     });
                     send(Input::Release(position), cx);
                 }

@@ -340,6 +340,11 @@ impl Console {
         }
         self.refresh_marks(cx);
         let job = Job::statements(statements).on_error(ErrorPolicy::Stop);
+        let job = if self.explain.is_some() {
+            job.with_complete_result()
+        } else {
+            job
+        };
         self.running = Some(self.session.execute(job));
         self.pane = Pane::Output;
         cx.emit(ConsoleEvent::Started);
@@ -577,7 +582,8 @@ impl Console {
                 has_more,
                 ..
             } => {
-                if self.show_plan(&rows, window, cx) {
+                if self.explain.is_some() {
+                    self.show_plan(columns, rows, window, cx);
                     return;
                 }
                 if let Some(current) = self.current.as_mut() {

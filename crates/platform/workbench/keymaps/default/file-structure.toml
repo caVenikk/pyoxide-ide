@@ -1,0 +1,10 @@
+# Group filters of the File Structure popup.
+
+[[context]]
+name = "FileStructure"
+[context.bindings]
+"ctrl-d" = "structure.toggle-first"
+"ctrl-m" = "structure.toggle-second"
+"ctrl-s" = "structure.toggle-third"
+"ctrl-o" = "structure.toggle-fourth"
+"f4" = "menu.confirm"

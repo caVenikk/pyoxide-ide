@@ -391,6 +391,36 @@ fn oracle_moves_one_savepoint_and_ddl_ends_the_transaction() {
 }
 
 #[test]
+fn a_complete_plan_reads_all_cursor_pages_from_one_execution() {
+    let h = harness(
+        Backend::Postgres,
+        DataSourceOptions {
+            page_size: 2,
+            ..DataSourceOptions::default()
+        },
+    );
+    let sql = "EXPLAIN (ANALYZE, FORMAT TEXT) SELECT 1";
+    h.source.on(
+        "explain",
+        Reaction::column(
+            "QUERY PLAN",
+            &["first", "second", "third", "fourth", "last"],
+        ),
+    );
+    let session = h.handle.open_session(SessionOptions::default());
+    let events = h.job(session.execute(Job::script(sql).with_complete_result()));
+    let JobEvent::ResultOpened { rows, has_more, .. } = &events[1] else {
+        panic!("{events:?}")
+    };
+    assert_eq!(rows.len(), 5);
+    assert!(!has_more);
+    assert_eq!(
+        h.console_sql().iter().filter(|q| q.as_str() == sql).count(),
+        1
+    );
+}
+
+#[test]
 fn rows_are_paged_from_the_open_cursor() {
     let h = harness(
         Backend::Postgres,

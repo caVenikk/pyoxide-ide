@@ -226,6 +226,8 @@ struct State {
     pending: Vec<Box<dyn Pending>>,
     status: Vec<ServerStatus>,
     completion_triggers: Vec<char>,
+    structure_filters: &'static [&'static str],
+    inline_rename: bool,
 }
 
 /// An in-memory [`CodeIntel`] (see the module documentation).
@@ -236,6 +238,14 @@ pub struct FakeCodeIntel {
 }
 
 impl FakeCodeIntel {
+    pub fn set_structure_filters(&self, filters: &'static [&'static str]) {
+        self.lock().structure_filters = filters;
+    }
+
+    pub fn set_inline_rename(&self, inline: bool) {
+        self.lock().inline_rename = inline;
+    }
+
     pub fn new() -> Arc<Self> {
         Arc::new(Self::default())
     }
@@ -673,6 +683,12 @@ fn apply(text: &mut Rope, edit: &AppliedEdit) -> bool {
 }
 
 impl CodeIntel for FakeCodeIntel {
+    fn structure_filters(&self, _: &DocumentId) -> &'static [&'static str] {
+        self.lock().structure_filters
+    }
+    fn prefers_inline_rename(&self, _: &DocumentId) -> bool {
+        self.lock().inline_rename
+    }
     fn did_open(&self, doc: &DocumentId, language: &str, version: u64, text: &Rope) {
         let mut state = self.lock();
         state.calls.push(Call::DidOpen {

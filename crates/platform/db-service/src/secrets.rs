@@ -46,6 +46,7 @@ pub enum SecretSource {
     /// The OS credential store (its name).
     Store(String),
     Prompt,
+    Pgpass,
     /// Not needed for this profile.
     NotNeeded,
     Missing,
@@ -56,6 +57,7 @@ impl std::fmt::Display for SecretSource {
         match self {
             SecretSource::Env(name) => write!(f, "environment variable {name}"),
             SecretSource::Store(name) => write!(f, "{name}"),
+            SecretSource::Pgpass => f.write_str("PostgreSQL password file"),
             SecretSource::Prompt => f.write_str("interactive prompt"),
             SecretSource::NotNeeded => f.write_str("not needed"),
             SecretSource::Missing => f.write_str("missing"),
@@ -106,6 +108,21 @@ impl SecretResolver<'_> {
             if let Some(v) = (self.env)(var) {
                 return (Secret::new(v), SecretSource::Env(var.to_owned()), None);
             }
+        }
+        if kind == SecretKind::Password
+            && profile.gui_options().auth == db_core::profile::AuthMethod::Pgpass
+        {
+            if let Some(secret) = (self.env)("PGPASSWORD") {
+                return (
+                    Secret::new(secret),
+                    SecretSource::Env("PGPASSWORD".into()),
+                    None,
+                );
+            }
+            return match crate::pgpass::lookup(profile, self.env) {
+                Some(secret) => (secret, SecretSource::Pgpass, None),
+                None => (Secret::default(), SecretSource::Missing, None),
+            };
         }
         let mut store_error = None;
         match self.store.get(&secret_service(), &kind.account(name)) {

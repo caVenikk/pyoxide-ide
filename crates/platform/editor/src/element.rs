@@ -583,7 +583,49 @@ fn display_text(
             }
         }
     }
+    if let Some((ranges, replacement)) = &editor.linked_preview {
+        let start = editor.buffer.line_start(line) + cols.start;
+        return project_replacements(text, map, start..start + cols.len(), ranges, replacement);
+    }
     (text, map)
+}
+
+/// Project replacements into one shaped row while retaining the source column of
+/// each glyph boundary. Highlighting, carets and the inline field use this map.
+fn project_replacements(
+    source: String,
+    bytes: Option<Vec<u32>>,
+    columns: Range<usize>,
+    ranges: &[Range<usize>],
+    replacement: &str,
+) -> (String, Option<Vec<u32>>) {
+    let first = ranges.partition_point(|range| range.end <= columns.start);
+    let ranges = &ranges[first..];
+    if ranges.first().is_none_or(|r| r.start >= columns.end) {
+        return (source, bytes);
+    }
+    let byte_at = |col: usize| bytes.as_ref().map_or(col, |map| map[col] as usize);
+    let mut text = String::with_capacity(source.len());
+    let mut map = Vec::with_capacity(columns.len() + 1);
+    let mut cursor = 0;
+    for range in ranges.iter().take_while(|r| r.start < columns.end) {
+        let from = range.start.max(columns.start) - columns.start;
+        let to = range.end.min(columns.end) - columns.start;
+        let original = byte_at(cursor);
+        let prefix = text.len();
+        map.extend((cursor..from).map(|col| (prefix + byte_at(col) - original) as u32));
+        text.push_str(&source[original..byte_at(from)]);
+        map.resize(to, text.len() as u32);
+        if range.start >= columns.start {
+            text.push_str(replacement);
+        }
+        cursor = to;
+    }
+    let original = byte_at(cursor);
+    let prefix = text.len();
+    map.extend((cursor..=columns.len()).map(|col| (prefix + byte_at(col) - original) as u32));
+    text.push_str(&source[original..]);
+    (text, Some(map))
 }
 
 /// Splits `runs` so that the bytes `range` can be restyled by `f`.
@@ -2461,6 +2503,19 @@ impl Editor {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn linked_preview_remaps_every_unicode_occurrence_and_the_following_text() {
+        let (text, map) = super::project_replacements(
+            "é c + c".into(),
+            Some(vec![0, 2, 3, 4, 5, 6, 7, 8]),
+            10..17,
+            &[12..13, 16..17],
+            "客户",
+        );
+        assert_eq!(text, "é 客户 + 客户");
+        assert_eq!(map.unwrap(), [0, 2, 3, 9, 10, 11, 12, 18]);
+    }
+
     use super::*;
     use crate::diagnostics::{DiagnosticMark, MarkSeverity};
 

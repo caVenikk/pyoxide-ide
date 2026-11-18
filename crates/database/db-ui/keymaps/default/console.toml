@@ -5,3 +5,24 @@
 name = "Editor && SqlFile"
 [context.bindings]
 "ctrl-enter" = "db.console.execute"
+
+[[context]]
+name = "DatabasePlanTree"
+[context.bindings]
+"up" = "db.plan.up"
+"down" = "db.plan.down"
+"left" = "db.plan.left"
+"right" = "db.plan.right"
+
+[[context]]
+name = "DatabasePlanTree || DatabasePlanRaw"
+[context.bindings]
+"tab" = "db.plan.switch-view"
+"escape" = "workbench.focus-editor"
+
+# The PostgreSQL raw result embeds the standard data grid, whose own Escape
+# dismisses table reads. This result has already finished loading.
+[[context]]
+name = "DatabasePlanRaw > DatabaseGrid"
+[context.bindings]
+"escape" = "workbench.focus-editor"

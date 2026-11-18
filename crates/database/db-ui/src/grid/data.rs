@@ -29,8 +29,7 @@ pub struct GridColumn {
     pub kind: ValueKind,
     pub right: bool,
     pub key: KeyMark,
-    /// The width the content asks for, in characters of the editor font
-    /// (header included), capped.
+    /// The longest displayed cell line, in characters of the editor font.
     pub chars: usize,
 }
 
@@ -48,7 +47,7 @@ pub struct GridPage {
     pub has_more: bool,
 }
 
-/// Longest content a column widens for, in characters.
+/// Default data grid column width limit, in characters.
 pub const MAX_COLUMN_CHARS: usize = 50;
 /// Narrowest column, in characters.
 const MIN_COLUMN_CHARS: usize = 4;
@@ -135,7 +134,7 @@ impl GridPage {
                             let len = text
                                 .as_deref()
                                 .map_or(format::NULL_TEXT.len(), first_line_chars);
-                            c.chars = c.chars.max(len.min(MAX_COLUMN_CHARS));
+                            c.chars = c.chars.max(len);
                         }
                         text.map(SharedString::from)
                     })
@@ -143,7 +142,7 @@ impl GridPage {
             })
             .collect();
         for c in &mut grid_columns {
-            c.chars = c.chars.clamp(MIN_COLUMN_CHARS, MAX_COLUMN_CHARS);
+            c.chars = c.chars.max(MIN_COLUMN_CHARS);
         }
         Self {
             columns: grid_columns,

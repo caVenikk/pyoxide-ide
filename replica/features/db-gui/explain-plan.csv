@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-Explain plan,db-gui,could,yes,yes,"Pro; Explain Plan for PostgreSQL, Oracle and SQLite; PostgreSQL Explain Analyze; Query Plan tree, selected-node properties and raw output; read-only restrictions enforced; plan-tree keyboard navigation and remaining UI parity tracked in #308"
+Explain plan,db-gui,could,yes,yes,"Explain Plan supports PostgreSQL, Oracle and SQLite. The Explain toolbar offers Explain Plan and Explain Analyse. PostgreSQL Raw fits its QUERY PLAN column to the server text rows from the same execution as Operations Tree. Tree navigation, selected-node properties and read-only restrictions are covered by #481."
